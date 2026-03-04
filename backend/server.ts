@@ -7,6 +7,7 @@ import bcrypt from 'bcryptjs';
 import db from './db.ts';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import axios from 'axios';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JWT_SECRET = process.env.JWT_SECRET || 'ecotrade_secret_key_123';
@@ -90,6 +91,31 @@ async function startServer() {
     res.json(listing);
   });
 
+  app.post('/api/cart/validate', (req, res) => {
+    const { ids } = req.body;
+    if (!Array.isArray(ids)) return res.status(400).json({ error: 'Invalid IDs' });
+
+    const listings = [];
+    for (const id of ids) {
+      let listing: any = db.prepare('SELECT id, title, status, price FROM listings WHERE id = ?').get(id);
+      if (listing && listing.status === 'reserved') {
+        const pendingTx: any = db.prepare(`
+          SELECT * FROM transactions 
+          WHERE listing_id = ? AND status = 'pending_payment' 
+          AND created_at > datetime('now', '-15 minutes')
+        `).get(id);
+        
+        if (!pendingTx) {
+          db.prepare("UPDATE listings SET status = 'available' WHERE id = ?").run(id);
+          listing.status = 'available';
+        }
+      }
+      if (listing) listings.push(listing);
+    }
+
+    res.json(listings);
+  });
+
   app.post('/api/listings', authenticateToken, (req: any, res) => {
     const { title, description, category, condition, price, is_negotiable, location, images } = req.body;
     const stmt = db.prepare(`
@@ -169,7 +195,27 @@ async function startServer() {
     const listing: any = db.prepare('SELECT * FROM listings WHERE id = ?').get(listing_id);
     const buyer: any = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
 
-    if (!listing || listing.status !== 'available') return res.status(400).json({ error: 'Listing not available' });
+    if (!listing) return res.status(404).json({ error: 'Listing not found' });
+    
+    // Auto-release logic: if reserved but no active pending payment transaction in last 15 mins
+    if (listing.status === 'reserved') {
+      const pendingTx: any = db.prepare(`
+        SELECT * FROM transactions 
+        WHERE listing_id = ? AND status = 'pending_payment' 
+        AND created_at > datetime('now', '-15 minutes')
+      `).get(listing_id);
+      
+      if (!pendingTx) {
+        // Safe to re-reserve
+        db.prepare("UPDATE listings SET status = 'available' WHERE id = ?").run(listing_id);
+        listing.status = 'available';
+      }
+    }
+
+    if (listing.status !== 'available') {
+      return res.status(400).json({ error: `Listing "${listing.title}" is currently ${listing.status}` });
+    }
+    
     if (buyer.wallet_balance < listing.price) return res.status(400).json({ error: 'Insufficient funds' });
 
     try {
@@ -194,34 +240,194 @@ async function startServer() {
     const { items, total, shipping_address } = req.body;
     const buyer: any = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
 
-    if (buyer.wallet_balance < total) return res.status(400).json({ error: 'Insufficient funds for total amount including shipping' });
-
     try {
       const checkoutTx = db.transaction(() => {
-        db.prepare('UPDATE users SET wallet_balance = wallet_balance - ? WHERE id = ?').run(total, req.user.id);
-        
-        const shipping_fee_per_item = (total - items.reduce((acc: number, id: number) => {
-          const l: any = db.prepare('SELECT price FROM listings WHERE id = ?').get(id);
-          return acc + (l?.price || 0);
-        }, 0)) / items.length;
+        const availableItems = [];
+        const unavailableItems = [];
 
         for (const listing_id of items) {
-          const listing: any = db.prepare('SELECT * FROM listings WHERE id = ?').get(listing_id);
-          if (!listing || listing.status !== 'available') throw new Error(`Listing ${listing_id} not available`);
-
-          db.prepare(`
-            INSERT INTO transactions (listing_id, buyer_id, seller_id, amount, shipping_fee, total_amount, status, escrow_status, shipping_address)
-            VALUES (?, ?, ?, ?, ?, ?, 'paid', 'held', ?)
-          `).run(listing_id, req.user.id, listing.seller_id, listing.price, shipping_fee_per_item, listing.price + shipping_fee_per_item, shipping_address);
+          let listing: any = db.prepare('SELECT * FROM listings WHERE id = ?').get(listing_id);
           
-          db.prepare('UPDATE listings SET status = ? WHERE id = ?').run('sold', listing_id);
+          if (listing && listing.status === 'reserved') {
+            const pendingTx: any = db.prepare(`
+              SELECT * FROM transactions 
+              WHERE listing_id = ? AND status = 'pending_payment' 
+              AND created_at > datetime('now', '-15 minutes')
+            `).get(listing_id);
+            
+            if (!pendingTx) {
+              db.prepare("UPDATE listings SET status = 'available' WHERE id = ?").run(listing_id);
+              listing.status = 'available';
+            }
+          }
+
+          if (listing && listing.status === 'available') {
+            availableItems.push(listing);
+          } else {
+            unavailableItems.push(listing_id);
+          }
+        }
+
+        if (availableItems.length === 0) {
+          throw new Error('No items in your cart are currently available for purchase.');
+        }
+
+        // Calculate total for available items only
+        const subtotal = availableItems.reduce((acc, l) => acc + l.price, 0);
+        const shipping_fee_per_item = (total - subtotal) / availableItems.length;
+
+        const transactionIds = [];
+        for (const listing of availableItems) {
+          const result = db.prepare(`
+            INSERT INTO transactions (listing_id, buyer_id, seller_id, amount, shipping_fee, total_amount, status, escrow_status, shipping_address)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', ?)
+          `).run(listing.id, req.user.id, listing.seller_id, listing.price, shipping_fee_per_item, listing.price + shipping_fee_per_item, shipping_address);
+          
+          transactionIds.push(result.lastInsertRowid);
+          db.prepare('UPDATE listings SET status = ? WHERE id = ?').run('reserved', listing.id);
+        }
+        return { transactionIds, unavailableItems };
+      });
+
+      const { transactionIds, unavailableItems } = checkoutTx();
+      res.json({ 
+        success: true, 
+        transaction_ids: transactionIds,
+        unavailable_items: unavailableItems 
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // --- Payment Routes ---
+  app.post('/api/pay', authenticateToken, async (req: any, res) => {
+    const { amount, transaction_ids } = req.body;
+    const user: any = db.prepare('SELECT email, name FROM users WHERE id = ?').get(req.user.id);
+    const FLW_SECRET_KEY = process.env.FLW_SECRET_KEY;
+
+    // Simulation Mode for Demo
+    if (!FLW_SECRET_KEY || FLW_SECRET_KEY === 'FLWSECK_TEST-MOCK-KEY') {
+      console.warn('FLW_SECRET_KEY is missing or using mock key. Using simulation mode.');
+      const tx_ref = `eco-${Date.now()}-${transaction_ids.join('-')}`;
+      
+      // In simulation mode, we'll just return a link that redirects back to our success page
+      // with the necessary params to trigger verification
+      return res.json({
+        status: 'success',
+        message: 'Payment initiated (Simulation Mode)',
+        data: {
+          link: `${req.headers.origin}/payment-success?status=successful&tx_ref=${tx_ref}&mode=simulation`
         }
       });
-      checkoutTx();
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
     }
+
+    try {
+      const response = await axios.post(
+        'https://api.flutterwave.com/v3/payments',
+        {
+          tx_ref: `eco-${Date.now()}-${transaction_ids.join('-')}`,
+          amount,
+          currency: 'KES',
+          redirect_url: `${req.headers.origin}/payment-success`,
+          customer: {
+            email: user.email,
+            name: user.name,
+          },
+          customizations: {
+            title: 'EcoTrade Checkout',
+            description: 'Payment for EcoTrade items',
+            logo: 'https://picsum.photos/seed/ecotrade/200/200',
+          },
+          payment_options: 'card, mpesa, airtel',
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${FLW_SECRET_KEY}`,
+          },
+        }
+      );
+
+      // Update transactions with the reference
+      for (const id of transaction_ids) {
+        db.prepare('UPDATE transactions SET payment_reference = ? WHERE id = ?').run(response.data.data.tx_ref, id);
+      }
+
+      res.json(response.data);
+    } catch (error: any) {
+      console.error('Payment initiation error:', error.response?.data || error.message);
+      res.status(500).json({ error: 'Failed to initiate payment. Please check your FLW_SECRET_KEY.' });
+    }
+  });
+
+  app.get('/api/pay/verify', authenticateToken, async (req: any, res) => {
+    const { tx_ref, mode } = req.query;
+    if (!tx_ref) return res.status(400).json({ error: 'Missing tx_ref' });
+
+    try {
+      // If simulation mode, we trust the client (only for demo!)
+      if (mode === 'simulation') {
+        const transactionIds = tx_ref.split('-').slice(2);
+        const updateTx = db.transaction(() => {
+          for (const txId of transactionIds) {
+            const tx: any = db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId);
+            if (tx && tx.status === 'pending_payment') {
+              db.prepare(`
+                UPDATE transactions 
+                SET status = 'paid', escrow_status = 'held', payment_reference = ?, gateway_response = ?
+                WHERE id = ?
+              `).run('MOCK_FLW_ID', JSON.stringify({ mode: 'simulation' }), txId);
+              
+              db.prepare('UPDATE listings SET status = ? WHERE id = ?').run('sold', tx.listing_id);
+            }
+          }
+        });
+        updateTx();
+        return res.json({ status: 'success', message: 'Payment verified (Simulated)' });
+      }
+
+      // Real verification would call Flutterwave API here
+      // For now, we'll just check if we have the tx_ref in our DB and it's marked as paid via webhook
+      // If not, we could poll Flutterwave, but for this demo we'll assume the webhook handles it
+      // or we can manually check here if needed.
+      
+      res.json({ status: 'success', message: 'Payment verification initiated' });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/webhook/flutterwave', (req, res) => {
+    const secretHash = process.env.FLW_SECRET_HASH;
+    const signature = req.headers['verif-hash'];
+
+    if (secretHash && signature !== secretHash) {
+      return res.status(401).end();
+    }
+
+    const { status, tx_ref, id: flw_id } = req.body.data || req.body;
+
+    if (status === 'successful') {
+      const transactionIds = tx_ref.split('-').slice(2); // Extract IDs from eco-timestamp-id1-id2...
+      
+      const updateTx = db.transaction(() => {
+        for (const txId of transactionIds) {
+          const tx: any = db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId);
+          if (tx && tx.status === 'pending_payment') {
+            db.prepare(`
+              UPDATE transactions 
+              SET status = 'paid', escrow_status = 'held', payment_reference = ?, gateway_response = ?
+              WHERE id = ?
+            `).run(flw_id, JSON.stringify(req.body), txId);
+            
+            db.prepare('UPDATE listings SET status = ? WHERE id = ?').run('sold', tx.listing_id);
+          }
+        }
+      });
+      updateTx();
+    }
+
+    res.status(200).end();
   });
 
   app.get('/api/orders', authenticateToken, (req: any, res) => {

@@ -44,6 +44,9 @@ db.exec(`
     total_amount REAL NOT NULL,
     status TEXT DEFAULT 'pending', -- pending, paid, shipped, delivered, completed, disputed, refunded
     escrow_status TEXT DEFAULT 'pending', -- pending, held, released, refunded
+    payment_method TEXT,
+    payment_reference TEXT,
+    gateway_response TEXT,
     shipping_address TEXT,
     tracking_id TEXT,
     dispute_reason TEXT,
@@ -95,5 +98,10 @@ db.exec(`
     UNIQUE(transaction_id, buyer_id)
   );
 `);
+
+// Ensure new columns exist for existing databases
+try { db.exec('ALTER TABLE transactions ADD COLUMN payment_method TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE transactions ADD COLUMN payment_reference TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE transactions ADD COLUMN gateway_response TEXT'); } catch (e) {}
 
 export default db;

@@ -151,9 +151,10 @@ export default function Orders({ user }: { user: any }) {
                       <span className={`inline-block rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wider ${
                         order.status === 'completed' ? 'bg-emerald-100 text-emerald-600' :
                         order.status === 'disputed' ? 'bg-red-100 text-red-600' :
+                        order.status === 'pending_payment' ? 'bg-amber-100 text-amber-600' :
                         'bg-blue-100 text-blue-600'
                       }`}>
-                        {order.status}
+                        {order.status.replace('_', ' ')}
                       </span>
                     </div>
                   </div>
@@ -195,6 +196,34 @@ export default function Orders({ user }: { user: any }) {
                       )}
 
                       {/* Buyer Actions */}
+                      {activeTab === 'buying' && order.status === 'pending_payment' && (
+                        <button 
+                          onClick={async () => {
+                            try {
+                              const res = await fetch('/api/pay', {
+                                method: 'POST',
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  'Authorization': `Bearer ${localStorage.getItem('token')}`
+                                },
+                                body: JSON.stringify({
+                                  amount: order.total_amount,
+                                  transaction_ids: [order.id]
+                                })
+                              });
+                              const data = await res.json();
+                              if (data.status === 'success' && data.data.link) {
+                                window.location.href = data.data.link;
+                              }
+                            } catch (err) {
+                              console.error('Failed to initiate payment');
+                            }
+                          }}
+                          className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-bold text-white hover:bg-amber-700"
+                        >
+                          Pay Now
+                        </button>
+                      )}
                       {activeTab === 'buying' && order.status === 'delivered' && (
                         <>
                           <button 

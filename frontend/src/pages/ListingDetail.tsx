@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { MapPin, ShieldCheck, MessageSquare, ShoppingCart, Star, ArrowLeft, Loader2, Tag, X } from 'lucide-react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { MapPin, ShieldCheck, MessageSquare, ShoppingCart, Star, ArrowLeft, Loader2, Tag, X, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function ListingDetail({ user, addToCart }: { user: any, addToCart: (item: any) => void }) {
@@ -160,6 +160,15 @@ export default function ListingDetail({ user, addToCart }: { user: any, addToCar
             )}
 
             <div className="mt-8 flex flex-wrap gap-4">
+              {listing.status !== 'available' && (
+                <div className="w-full rounded-2xl bg-amber-50 p-4 text-amber-800 border border-amber-100 flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5" />
+                  <div>
+                    <p className="font-bold uppercase text-[10px] tracking-widest">Status: {listing.status}</p>
+                    <p className="text-sm">This item is currently {listing.status}. It may become available again if the current transaction is not completed.</p>
+                  </div>
+                </div>
+              )}
               <button
                 onClick={handleBuy}
                 disabled={buying || listing.status !== 'available'}

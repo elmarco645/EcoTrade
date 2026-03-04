@@ -20,6 +20,7 @@ import Cart from './pages/Cart';
 import Orders from './pages/Orders';
 import Offers from './pages/Offers';
 import SearchResults from './pages/SearchResults';
+import PaymentSuccess from './pages/PaymentSuccess';
 import NotFound from './pages/NotFound';
 
 export default function App() {
@@ -104,6 +105,7 @@ export default function App() {
             />
             <Route path="/login" element={<Login setUser={setUser} />} />
             <Route path="/register" element={<Register setUser={setUser} />} />
+            <Route path="/payment-success" element={<PaymentSuccess />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </main>
