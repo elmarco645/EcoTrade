@@ -13,6 +13,14 @@ export default function Orders({ user }: { user: any }) {
   const [comment, setComment] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
 
+  const ratingLabels: Record<number, string> = {
+    1: "Poor",
+    2: "Bad",
+    3: "Average",
+    4: "Good",
+    5: "Awesome"
+  };
+
   useEffect(() => {
     if (!user) return navigate('/login');
     fetchOrders();
@@ -59,9 +67,8 @@ export default function Orders({ user }: { user: any }) {
         },
         body: JSON.stringify({
           transaction_id: showReviewModal.id,
-          reviewee_id: showReviewModal.seller_id,
           rating,
-          comment
+          review_text: comment
         })
       });
       if (res.ok) {
@@ -241,32 +248,46 @@ export default function Orders({ user }: { user: any }) {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-md rounded-[2.5rem] bg-white p-8 shadow-2xl"
+              className="relative w-full max-w-md overflow-hidden rounded-[2.5rem] bg-white shadow-2xl"
             >
-              <h2 className="mb-2 text-2xl font-bold">Rate your experience</h2>
-              <p className="mb-6 text-slate-500">How was your transaction with {showReviewModal.seller_name}?</p>
-              
-              <div className="space-y-6">
-                <div className="flex justify-center gap-2">
-                  {[1, 2, 3, 4, 5].map(s => (
-                    <button key={s} onClick={() => setRating(s)}>
-                      <Star className={`h-8 w-8 ${s <= rating ? 'fill-amber-500 text-amber-500' : 'text-slate-200'}`} />
-                    </button>
-                  ))}
+              <div className="bg-slate-50 p-8 pb-6 text-center">
+                <h2 className="text-2xl font-bold">Rate your experience</h2>
+                <p className="mt-1 text-sm text-slate-500">How was your transaction with {showReviewModal.seller_name}?</p>
+              </div>
+
+              <div className="p-8 pt-6 space-y-8">
+                <div className="text-center space-y-3">
+                  <div className="flex justify-center gap-2">
+                    {[1, 2, 3, 4, 5].map(s => (
+                      <button 
+                        key={s} 
+                        onClick={() => setRating(s)}
+                        className="transition-transform hover:scale-110 active:scale-95"
+                      >
+                        <Star className={`h-10 w-10 ${s <= rating ? 'fill-amber-400 text-amber-400' : 'text-slate-200'}`} />
+                      </button>
+                    ))}
+                  </div>
+                  <p className={`text-lg font-bold transition-colors ${rating >= 4 ? 'text-emerald-600' : rating >= 3 ? 'text-amber-600' : 'text-red-500'}`}>
+                    {ratingLabels[rating]}
+                  </p>
                 </div>
                 
-                <textarea
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  placeholder="Tell us more about the item and seller..."
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 outline-none focus:border-blue-500"
-                  rows={4}
-                />
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Your Review</label>
+                  <textarea
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder="Describe your experience with this seller..."
+                    className="w-full rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50/50"
+                    rows={4}
+                  />
+                </div>
                 
                 <button
                   onClick={submitReview}
-                  disabled={submittingReview}
-                  className="w-full rounded-2xl bg-blue-600 py-4 font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                  disabled={submittingReview || comment.length < 5}
+                  className="w-full rounded-2xl bg-blue-600 py-4 font-bold text-white shadow-lg shadow-blue-100 transition-all hover:bg-blue-700 hover:shadow-blue-200 active:scale-[0.98] disabled:opacity-50 disabled:shadow-none"
                 >
                   {submittingReview ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : 'Submit Review'}
                 </button>

@@ -13,6 +13,7 @@ export default function ListingDetail({ user, addToCart }: { user: any, addToCar
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [offerAmount, setOfferAmount] = useState('');
   const [offering, setOffering] = useState(false);
+  const [reviews, setReviews] = useState<any[]>([]);
 
   useEffect(() => {
     fetch(`/api/listings/${id}`)
@@ -20,6 +21,11 @@ export default function ListingDetail({ user, addToCart }: { user: any, addToCar
       .then(data => {
         setListing(data);
         setLoading(false);
+        if (data.seller_id) {
+          fetch(`/api/sellers/${data.seller_id}/reviews`)
+            .then(res => res.json())
+            .then(setReviews);
+        }
       });
   }, [id]);
 
@@ -130,7 +136,8 @@ export default function ListingDetail({ user, addToCart }: { user: any, addToCar
               </div>
               <div className="flex items-center gap-1">
                 <Star className="h-4 w-4 fill-amber-500 text-amber-500" />
-                {listing.seller_rating || 'New Seller'}
+                <span className="font-bold text-slate-900">{listing.seller_rating ? listing.seller_rating.toFixed(1) : 'New'}</span>
+                <span className="text-xs">({listing.seller_reviews_count || 0} reviews)</span>
               </div>
             </div>
           </div>
@@ -206,6 +213,53 @@ export default function ListingDetail({ user, addToCart }: { user: any, addToCar
             <p className="leading-relaxed text-slate-600">
               {listing.description}
             </p>
+          </div>
+
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold">Seller Reviews</h3>
+              {listing.seller_rating && (
+                <div className="flex items-center gap-1 text-sm font-bold text-amber-600">
+                  <Star className="h-4 w-4 fill-amber-500" />
+                  {listing.seller_rating.toFixed(1)} Average
+                </div>
+              )}
+            </div>
+            
+            {reviews.length === 0 ? (
+              <div className="rounded-2xl bg-slate-50 p-8 text-center text-slate-500">
+                No reviews yet for this seller.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {reviews.slice(0, 3).map((review) => (
+                  <div key={review.id} className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-blue-600">
+                          {review.buyer_name?.[0]}
+                        </div>
+                        <span className="text-sm font-bold">{review.buyer_name}</span>
+                      </div>
+                      <div className="flex gap-0.5">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <Star key={s} className={`h-3 w-3 ${s <= review.rating ? 'fill-amber-400 text-amber-400' : 'text-slate-200'}`} />
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-sm text-slate-600 italic">"{review.review_text}"</p>
+                    <p className="mt-2 text-[10px] text-slate-400 uppercase tracking-widest">
+                      {new Date(review.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                ))}
+                {reviews.length > 3 && (
+                  <button className="w-full rounded-xl bg-slate-50 py-3 text-sm font-bold text-slate-600 hover:bg-slate-100">
+                    View all {reviews.length} reviews
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-4 rounded-2xl bg-slate-100 p-4">
