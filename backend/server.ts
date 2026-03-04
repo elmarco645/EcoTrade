@@ -13,7 +13,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JWT_SECRET = process.env.JWT_SECRET || 'ecotrade_secret_key_123';
 
 async function startServer() {
-  console.log("🚀 Server file loaded and starting...");
   const app = express();
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
@@ -560,66 +559,21 @@ async function startServer() {
     });
   });
 
-  // --- Catch-all route for debugging ---
-  app.use((req, res, next) => {
-    console.log(`📍 Request: ${req.method} ${req.path}`);
-    next();
-  });
-
   // --- Vite Middleware ---
-  console.log(`NODE_ENV: ${process.env.NODE_ENV || 'undefined'}`);
-  const frontendRoot = path.resolve(__dirname, '../../frontend');
-  console.log(`Frontend root: ${frontendRoot}`);
-  
   if (process.env.NODE_ENV !== 'production') {
-    console.log("📦 Loading Vite middleware in development mode...");
-    try {
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: 'spa',
-        root: frontendRoot,
-      });
-      console.log("✅ Vite middleware loaded successfully");
-      app.use(vite.middlewares);
-      
-      // SPA fallback - serve index.html for all non-API routes
-      app.get('*', async (req, res) => {
-        console.log(`🔄 SPA fallback for: ${req.path}`);
-        const url = req.originalUrl;
-        try {
-          let template = await vite.transformIndexHtml(url, `
-            <!DOCTYPE html>
-            <html lang="en">
-              <head>
-                <meta charset="UTF-8" />
-                <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-                <title>EcoTrade</title>
-              </head>
-              <body>
-                <div id="root"></div>
-                <script type="module" src="/src/main.tsx"><\/script>
-              </body>
-            </html>
-          `);
-          res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-        } catch (e: any) {
-          console.error(`❌ Error transforming HTML: ${e.message}`);
-          res.status(500).end(e.message);
-        }
-      });
-    } catch (error: any) {
-      console.error("❌ Vite middleware error:", error.message);
-      throw error;
-    }
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+      root: path.resolve(__dirname, '../frontend'),
+    });
+    app.use(vite.middlewares);
   } else {
-    console.log("📦 Running in production mode - serving from dist...");
-    app.use(express.static(path.resolve(frontendRoot, 'dist')));
-    app.get('*', (req, res) => res.sendFile(path.resolve(frontendRoot, 'dist/index.html')));
+    app.use(express.static(path.resolve(__dirname, '../frontend/dist')));
+    app.get('*', (req, res) => res.sendFile(path.resolve(__dirname, '../frontend/dist/index.html')));
   }
 
-  const PORT = process.env.PORT || 3000;
-  httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Server running on http://localhost:${PORT}`);
+  httpServer.listen(3000, '0.0.0.0', () => {
+    console.log('Server running on http://localhost:3000');
     
     // Seed sample data if empty
     const usersCount: any = db.prepare('SELECT COUNT(*) as count FROM users').get();
