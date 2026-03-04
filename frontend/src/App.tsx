@@ -19,6 +19,7 @@ import Register from './pages/Register';
 import Cart from './pages/Cart';
 import Orders from './pages/Orders';
 import Offers from './pages/Offers';
+import SearchResults from './pages/SearchResults';
 import NotFound from './pages/NotFound';
 
 export default function App() {
@@ -71,6 +72,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/marketplace" element={<Marketplace />} />
+            <Route path="/search" element={<SearchResults />} />
             <Route path="/listing/:id" element={<ListingDetail user={user} addToCart={addToCart} />} />
             <Route 
               path="/cart" 

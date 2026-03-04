@@ -84,14 +84,15 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS reviews (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     transaction_id INTEGER NOT NULL,
-    reviewer_id INTEGER NOT NULL,
-    reviewee_id INTEGER NOT NULL,
-    rating INTEGER NOT NULL,
-    comment TEXT,
+    buyer_id INTEGER NOT NULL,
+    seller_id INTEGER NOT NULL,
+    rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    review_text TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (transaction_id) REFERENCES transactions (id),
-    FOREIGN KEY (reviewer_id) REFERENCES users (id),
-    FOREIGN KEY (reviewee_id) REFERENCES users (id)
+    FOREIGN KEY (buyer_id) REFERENCES users (id),
+    FOREIGN KEY (seller_id) REFERENCES users (id),
+    UNIQUE(transaction_id, buyer_id)
   );
 `);
 

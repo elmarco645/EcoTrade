@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingBag, MessageSquare, Wallet, User, LogOut, Search, PlusCircle, ShoppingCart } from 'lucide-react';
+import { ShoppingBag, MessageSquare, Wallet, User, LogOut, Search, PlusCircle, ShoppingCart, X } from 'lucide-react';
 
 interface NavbarProps {
   user: any;
@@ -11,23 +11,58 @@ interface NavbarProps {
 export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [listings, setListings] = useState<any[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch('/api/listings')
+      .then(res => res.json())
+      .then(data => setListings(data))
+      .catch(err => console.error('Error fetching listings for search:', err));
+  }, []);
+
+  useEffect(() => {
+    if (searchQuery.trim().length > 1) {
+      const filtered = listings.filter(l => 
+        l.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        l.category.toLowerCase().includes(searchQuery.toLowerCase())
+      ).slice(0, 5);
+      setSuggestions(filtered);
+      setShowSuggestions(true);
+    } else {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  }, [searchQuery, listings]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setIsMenuOpen(false);
       }
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
     };
 
-    if (isMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-
+    document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isMenuOpen]);
+  }, []);
+
+  const handleSearch = (e?: any) => {
+    if (e) e.preventDefault();
+    if (!searchQuery.trim()) return;
+    setShowSuggestions(false);
+    setIsMobileSearchOpen(false);
+    navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+  };
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-slate-200 bg-white/80 backdrop-blur-md">
@@ -36,22 +71,78 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white">
             E
           </div>
-          <span>EcoTrade</span>
+          <span className={`${isMobileSearchOpen ? 'hidden sm:block' : ''}`}>EcoTrade</span>
         </Link>
 
-        <div className="hidden max-w-md flex-1 px-8 md:block">
-          <div className="relative">
+        <div className={`flex-1 px-4 md:px-8 ${isMobileSearchOpen ? 'block' : 'hidden md:block'}`}>
+          <form onSubmit={handleSearch} className="relative mx-auto max-w-md" ref={searchRef}>
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search items, brands, or categories..."
+              placeholder="Search items..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => searchQuery.trim().length > 1 && setShowSuggestions(true)}
               className="h-10 w-full rounded-full border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
             />
-          </div>
+            {isMobileSearchOpen && (
+              <button 
+                type="button"
+                onClick={() => setIsMobileSearchOpen(false)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 md:hidden"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
+                {suggestions.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      navigate(`/listing/${item.id}`);
+                      setShowSuggestions(false);
+                      setIsMobileSearchOpen(false);
+                      setSearchQuery('');
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
+                  >
+                    <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-100">
+                      <img
+                        src={JSON.parse(item.images || '[]')[0] || `https://picsum.photos/seed/${item.id}/100/100`}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900 line-clamp-1">{item.title}</div>
+                      <div className="text-xs text-slate-500">{item.category} • ${item.price}</div>
+                    </div>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={handleSearch}
+                  className="flex w-full items-center justify-center border-t border-slate-100 py-3 text-xs font-bold text-blue-600 hover:bg-slate-50"
+                >
+                  View all results for "{searchQuery}"
+                </button>
+              </div>
+            )}
+          </form>
         </div>
 
-        <div className="flex items-center gap-6">
-          <Link to="/marketplace" className="flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-blue-600">
+        <div className="flex items-center gap-3 md:gap-6">
+          <button 
+            onClick={() => setIsMobileSearchOpen(!isMobileSearchOpen)}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 md:hidden"
+          >
+            <Search className="h-5 w-5" />
+          </button>
+
+          <Link to="/marketplace" className="hidden items-center gap-1 text-sm font-medium text-slate-600 hover:text-blue-600 sm:flex">
             <ShoppingBag className="h-4 w-4" />
             <span>Shop</span>
           </Link>

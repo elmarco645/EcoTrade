@@ -61,6 +61,12 @@ async function startServer() {
     });
   };
 
+  app.get('/api/user/profile', authenticateToken, (req: any, res) => {
+    const user: any = db.prepare('SELECT id, email, name, role, bio, location, avatar_url, wallet_balance, rating, created_at FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  });
+
   // --- Listing Routes ---
   app.get('/api/listings', (req, res) => {
     const listings = db.prepare(`
@@ -75,7 +81,8 @@ async function startServer() {
 
   app.get('/api/listings/:id', (req, res) => {
     const listing = db.prepare(`
-      SELECT l.*, u.name as seller_name, u.avatar_url as seller_avatar, u.rating as seller_rating
+      SELECT l.*, u.name as seller_name, u.avatar_url as seller_avatar, u.rating as seller_rating,
+             (SELECT COUNT(*) FROM reviews WHERE seller_id = u.id) as seller_reviews_count
       FROM listings l 
       JOIN users u ON l.seller_id = u.id 
       WHERE l.id = ?
@@ -277,18 +284,43 @@ async function startServer() {
   });
 
   app.post('/api/reviews', authenticateToken, (req: any, res) => {
-    const { transaction_id, reviewee_id, rating, comment } = req.body;
-    const stmt = db.prepare(`
-      INSERT INTO reviews (transaction_id, reviewer_id, reviewee_id, rating, comment)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    stmt.run(transaction_id, req.user.id, reviewee_id, rating, comment);
+    const { transaction_id, rating, review_text } = req.body;
     
-    // Update reviewee rating
-    const avg: any = db.prepare('SELECT AVG(rating) as avg FROM reviews WHERE reviewee_id = ?').get(reviewee_id);
-    db.prepare('UPDATE users SET rating = ? WHERE id = ?').run(avg.avg, reviewee_id);
-    
-    res.json({ success: true });
+    try {
+      const transaction: any = db.prepare('SELECT * FROM transactions WHERE id = ?').get(transaction_id);
+      
+      if (!transaction) return res.status(404).json({ error: 'Transaction not found' });
+      if (transaction.status !== 'completed') return res.status(400).json({ error: 'Transaction must be completed to leave a review' });
+      if (transaction.buyer_id !== req.user.id) return res.status(403).json({ error: 'Only the buyer can review this transaction' });
+
+      const stmt = db.prepare(`
+        INSERT INTO reviews (transaction_id, buyer_id, seller_id, rating, review_text)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      stmt.run(transaction_id, req.user.id, transaction.seller_id, rating, review_text);
+      
+      // Update seller rating
+      const stats: any = db.prepare('SELECT AVG(rating) as avg, COUNT(*) as count FROM reviews WHERE seller_id = ?').get(transaction.seller_id);
+      db.prepare('UPDATE users SET rating = ? WHERE id = ?').run(stats.avg, transaction.seller_id);
+      
+      res.json({ success: true, avg_rating: stats.avg, total_reviews: stats.count });
+    } catch (error: any) {
+      if (error.message.includes('UNIQUE constraint failed')) {
+        return res.status(400).json({ error: 'You have already reviewed this transaction' });
+      }
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/sellers/:id/reviews', (req, res) => {
+    const reviews = db.prepare(`
+      SELECT r.*, u.name as buyer_name, u.avatar_url as buyer_avatar
+      FROM reviews r
+      JOIN users u ON r.buyer_id = u.id
+      WHERE r.seller_id = ?
+      ORDER BY r.created_at DESC
+    `).all(req.params.id);
+    res.json(reviews);
   });
 
   app.post('/api/transactions/:id/confirm', authenticateToken, (req: any, res) => {
