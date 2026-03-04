@@ -7,10 +7,10 @@ import {defineConfig, loadEnv} from 'vite';
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, path.resolve(__dirname, '..'), '');
   return {
-    plugins: [react(), tailwindcss(), pugPlugin()],
+    plugins: [react(), tailwindcss()],
     build: {
       rollupOptions: {
-        input: path.resolve(__dirname, 'index.pug'),
+        input: path.resolve(__dirname, 'index.html'),
       },
     },
     define: {
