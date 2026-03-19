@@ -64,15 +64,11 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
     navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
   };
 
-  const getGreeting = (name: string) => {
+  const getGreetingText = () => {
     const hour = new Date().getHours();
-    let greetingText = "Hi";
-    if (hour < 12) greetingText = "Good morning";
-    else if (hour < 18) greetingText = "Good afternoon";
-    else greetingText = "Good evening";
-    
-    const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
-    return `${greetingText}, ${capitalized}`;
+    if (hour < 12) return "Good morning";
+    if (hour < 18) return "Good afternoon";
+    return "Good evening";
   };
 
   return (
@@ -170,9 +166,6 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
 
           {user ? (
             <div className="flex items-center gap-3 md:gap-4">
-              <span className="hidden text-sm font-medium text-slate-600 lg:block">
-                {getGreeting(user.username || user.name || 'User')}
-              </span>
               <Link to="/chat" className="relative flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-blue-600">
                 <MessageSquare className="h-4 w-4" />
                 <span>Messages</span>
@@ -233,6 +226,14 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
                     </button>
                   </div>
                 )}
+              </div>
+              <div className="hidden flex-col leading-tight sm:flex">
+                <span className="text-xs font-medium text-slate-500">
+                  {getGreetingText()}
+                </span>
+                <span className="text-sm font-bold text-slate-700">
+                  {(user.username || user.name || 'User').charAt(0).toUpperCase() + (user.username || user.name || 'User').slice(1)}
+                </span>
               </div>
             </div>
           ) : (
