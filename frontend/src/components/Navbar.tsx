@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ShoppingBag, MessageSquare, Wallet, User, LogOut, Search, PlusCircle, ShoppingCart, X } from 'lucide-react';
+import LogoutConfirmModal from './LogoutConfirmModal';
 
 interface NavbarProps {
   user: any;
@@ -11,6 +12,7 @@ interface NavbarProps {
 export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -72,7 +74,8 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
   };
 
   return (
-    <nav className="sticky top-0 z-50 w-full border-b border-slate-200 bg-white/80 backdrop-blur-md">
+    <>
+      <nav className="sticky top-0 z-50 w-full border-b border-slate-200 bg-white/80 backdrop-blur-md">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <Link to="/" className="flex items-center gap-2 text-2xl font-bold text-blue-600">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white">
@@ -215,9 +218,8 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
                     </Link>
                     <button
                       onClick={() => {
-                        onLogout();
+                        setIsLogoutModalOpen(true);
                         setIsMenuOpen(false);
-                        navigate('/');
                       }}
                       className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-600 hover:bg-red-50"
                     >
@@ -248,6 +250,18 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
           )}
         </div>
       </div>
-    </nav>
+
+      </nav>
+
+      <LogoutConfirmModal
+        isOpen={isLogoutModalOpen}
+        onClose={() => setIsLogoutModalOpen(false)}
+        onConfirm={() => {
+          onLogout();
+          setIsLogoutModalOpen(false);
+          navigate('/');
+        }}
+      />
+    </>
   );
 }
