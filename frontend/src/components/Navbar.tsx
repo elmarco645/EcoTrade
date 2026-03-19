@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingBag, MessageSquare, Wallet, User, LogOut, Search, PlusCircle, ShoppingCart, X } from 'lucide-react';
+import { ShoppingBag, MessageSquare, Wallet, User, LogOut, Search, PlusCircle, ShoppingCart, X, ShieldCheck } from 'lucide-react';
 import LogoutConfirmModal from './LogoutConfirmModal';
 
 interface NavbarProps {
@@ -233,8 +233,11 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
                 <span className="text-xs font-medium text-slate-500">
                   {getGreetingText()}
                 </span>
-                <span className="text-sm font-bold text-slate-700">
+                <span className="text-sm font-bold text-slate-700 flex items-center gap-1">
                   {(user.username || user.name || 'User').charAt(0).toUpperCase() + (user.username || user.name || 'User').slice(1)}
+                  {user.is_seller_verified === 1 && (
+                    <ShieldCheck className="h-3.5 w-3.5 text-blue-500 fill-blue-50" />
+                  )}
                 </span>
               </div>
             </div>

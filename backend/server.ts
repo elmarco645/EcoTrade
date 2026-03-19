@@ -9,10 +9,108 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
 import crypto from 'crypto';
+import multer from 'multer';
+import fs from 'fs';
+import nodemailer from 'nodemailer';
+import rateLimit from 'express-rate-limit';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JWT_SECRET = process.env.JWT_SECRET || 'ecotrade_secret_key_123';
 const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET;
+
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS; // App Password for Gmail
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: EMAIL_USER,
+    pass: EMAIL_PASS,
+  },
+});
+
+const emailTemplate = (title: string, message: string, buttonText: string, link: string) => {
+  return `
+  <div style="font-family: Arial, sans-serif; background:#f4f6f8; padding:20px; color: #333;">
+    <div style="max-width:500px; margin:auto; background:white; padding:30px; border-radius:16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+      <div style="text-align:center; margin-bottom: 20px;">
+        <h2 style="color:#2ecc71; margin: 0; font-size: 28px;">🌱 EcoTrade</h2>
+      </div>
+      
+      <h3 style="color: #1a1a1a; margin-top: 0;">${title}</h3>
+      <p style="line-height: 1.6; color: #4a5568;">${message}</p>
+
+      <div style="text-align:center; margin:30px 0;">
+        <a href="${link}" 
+           style="background:#2ecc71; color:white; padding:14px 28px; 
+                  text-decoration:none; border-radius:8px; font-weight: bold; display: inline-block;">
+          ${buttonText}
+        </a>
+      </div>
+
+      <p style="font-size:12px; color:#94a3b8; text-align: center; margin-top: 30px; border-top: 1px solid #edf2f7; padding-top: 20px;">
+        If you didn’t request this, you can safely ignore this email.
+      </p>
+    </div>
+  </div>
+  `;
+};
+
+const sendVerificationEmail = async (email: string, token: string, origin: string) => {
+  if (!EMAIL_USER || !EMAIL_PASS) {
+    console.warn('Email credentials missing. Verification email simulation only.');
+    console.log(`[EMAIL SIMULATION] Verification link for ${email}: ${origin}/verify-email?token=${token}`);
+    return;
+  }
+
+  const link = `${origin}/verify-email?token=${token}`;
+
+  try {
+    await transporter.sendMail({
+      from: `"EcoTrade" <${EMAIL_USER}>`,
+      to: email,
+      subject: 'Verify your EcoTrade account',
+      html: emailTemplate(
+        "Verify Your Email",
+        "Welcome to EcoTrade! We're excited to have you join our community of sustainable traders. Click the button below to verify your account and start trading.",
+        "Verify Email",
+        link
+      )
+    });
+    console.log(`Verification email sent to ${email}`);
+  } catch (error) {
+    console.error('Error sending verification email:', error);
+    throw new Error('Failed to send verification email');
+  }
+};
+
+const sendForgotPasswordEmail = async (email: string, token: string, origin: string) => {
+  if (!EMAIL_USER || !EMAIL_PASS) {
+    console.warn('Email credentials missing. Forgot password email simulation only.');
+    console.log(`[EMAIL SIMULATION] Reset link for ${email}: ${origin}/reset-password?token=${token}`);
+    return;
+  }
+
+  const link = `${origin}/reset-password?token=${token}`;
+
+  try {
+    await transporter.sendMail({
+      from: `"EcoTrade" <${EMAIL_USER}>`,
+      to: email,
+      subject: 'Reset your EcoTrade password',
+      html: emailTemplate(
+        "Reset Your Password",
+        "We received a request to reset your password. If you didn't make this request, you can safely ignore this email. Otherwise, click the button below to choose a new password.",
+        "Reset Password",
+        link
+      )
+    });
+    console.log(`Forgot password email sent to ${email}`);
+  } catch (error) {
+    console.error('Error sending forgot password email:', error);
+    throw new Error('Failed to send reset email');
+  }
+};
 
 const verifyCaptcha = async (token: string) => {
   if (!RECAPTCHA_SECRET) return true; // Skip if not configured for demo
@@ -36,12 +134,125 @@ const verifyCaptcha = async (token: string) => {
 
 async function startServer() {
   const app = express();
+  app.set('trust proxy', 1);
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: { origin: '*' },
   });
 
   app.use(express.json());
+
+  // --- Rate Limiting Configuration ---
+
+  // Shared key generator to handle proxy headers
+  const keyGenerator = (req: any) => {
+    const forwarded = req.headers["forwarded"];
+    const xForwardedFor = req.headers["x-forwarded-for"];
+
+    if (forwarded) {
+      const match = forwarded.match(/for=([^;]+)/);
+      if (match) return match[1];
+    }
+
+    if (xForwardedFor) {
+      return xForwardedFor.split(",")[0].trim();
+    }
+
+    return req.ip;
+  };
+
+  const commonValidate = {
+    xForwardedForHeader: false, // Handled by app.set('trust proxy', 1)
+    forwardedHeader: false, // Handled by custom keyGenerator
+  };
+
+  // 1. General API Limiter (100 requests per 15 mins)
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: { error: 'Too many requests, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator,
+    validate: commonValidate,
+  });
+
+  // 2. Authentication Limiter (Stricter: 10 requests per 15 mins)
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { error: 'Too many authentication attempts, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator,
+    validate: commonValidate,
+  });
+
+  // 3. Sensitive Action Limiter (Medium: 20 requests per 15 mins)
+  // For creating listings, sending messages, wallet actions, etc.
+  const sensitiveActionLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: { error: 'Too many actions performed, please slow down' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator,
+    validate: commonValidate,
+  });
+
+  // Apply general limiter to all API routes
+  app.use('/api/', apiLimiter);
+
+  // Apply strict auth limiter to auth endpoints
+  app.use('/api/auth/login', authLimiter);
+  app.use('/api/auth/register', authLimiter);
+  app.use('/api/auth/resend-verification', authLimiter);
+  app.use('/api/auth/forgot-password', authLimiter);
+  app.use('/api/auth/reset-password', authLimiter);
+
+  // Apply sensitive action limiter to specific endpoints
+  app.post('/api/listings', sensitiveActionLimiter);
+  app.post('/api/offers', sensitiveActionLimiter);
+  app.post('/api/wallet/deposit', sensitiveActionLimiter);
+  app.post('/api/wallet/withdraw', sensitiveActionLimiter);
+  app.post('/api/transactions/checkout', sensitiveActionLimiter);
+  app.post('/api/messages', sensitiveActionLimiter);
+  app.post('/api/user/verify-id', sensitiveActionLimiter);
+  app.patch('/api/user/profile', sensitiveActionLimiter);
+  app.post('/api/user/upload-avatar', sensitiveActionLimiter);
+  app.post('/api/user/upload-cover', sensitiveActionLimiter);
+
+  // Create uploads directory if it doesn't exist
+  const uploadsDir = path.join(__dirname, '../uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+
+  // Configure multer
+  const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+      cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
+  });
+
+  const upload = multer({
+    storage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+    fileFilter: (req, file, cb) => {
+      if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only images are allowed'));
+      }
+    }
+  });
+
+  // Serve uploads statically
+  app.use('/uploads', express.static(uploadsDir));
 
   // --- Auth Routes ---
   app.post('/api/auth/register', async (req, res) => {
@@ -71,14 +282,16 @@ async function startServer() {
       const hashedPassword = await bcrypt.hash(password, 10);
       const verificationToken = crypto.randomBytes(32).toString('hex');
       
-      const stmt = db.prepare('INSERT INTO users (email, password, name, full_name, username, verification_token) VALUES (?, ?, ?, ?, ?, ?)');
+      const stmt = db.prepare('INSERT INTO users (email, password, name, full_name, username, verification_token, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, 0)');
       const result = stmt.run(email, hashedPassword, name, name, username || null, verificationToken);
       
-      // Simulate sending email
-      console.log(`[EMAIL SIMULATION] Verification link for ${email}: http://localhost:3000/verify-email?token=${verificationToken}`);
+      // Send real verification email
+      await sendVerificationEmail(email, verificationToken, req.headers.origin || 'http://localhost:3000');
       
-      const token = jwt.sign({ id: result.lastInsertRowid, email }, JWT_SECRET);
-      res.json({ token, user: { id: result.lastInsertRowid, email, name, username, role: 'buyer', is_email_verified: 0 } });
+      res.json({ 
+        message: 'Signup successful! Please check your email to verify your account.',
+        user: { id: result.lastInsertRowid, email, name, username, role: 'buyer', is_email_verified: 0 } 
+      });
     } catch (error: any) {
       if (error.message.includes('UNIQUE constraint failed: users.username')) {
         return res.status(400).json({ error: 'Username already taken' });
@@ -110,19 +323,44 @@ async function startServer() {
       }
 
       const isMatch = await bcrypt.compare(password, user.password);
+      
       if (!isMatch) {
         console.log(`[LOGIN FAILED] Password mismatch for: ${identifier}`);
+        
+        // Increment failed attempts
+        db.prepare('UPDATE users SET failed_attempts = failed_attempts + 1 WHERE id = ?').run(user.id);
+        
+        // Check if account should be locked (e.g., after 5 attempts)
+        if (user.failed_attempts + 1 >= 5) {
+          return res.status(401).json({ error: 'Account locked due to too many failed attempts. Please contact support or reset your password.' });
+        }
+        
+        // Artificial delay to prevent brute-force
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
+      // Reset failed attempts on success
+      db.prepare('UPDATE users SET failed_attempts = 0 WHERE id = ?').run(user.id);
+
       if (!user.is_email_verified) {
         console.log(`[LOGIN FAILED] Email not verified: ${identifier}`);
-        return res.status(403).json({ error: 'Please verify your email address first. Check your console for the simulation link.' });
+        return res.status(403).json({ 
+          error: 'Email not verified', 
+          message: 'Your email is not verified. Please check your email for the verification link.',
+          showResend: true,
+          email: user.email
+        });
       }
 
       console.log(`[LOGIN SUCCESS] User: ${user.email}`);
-      const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET);
-      res.json({ token, user: { id: user.id, email: user.email, name: user.name, username: user.username, role: user.role, is_email_verified: user.is_email_verified } });
+      const token = jwt.sign(
+        { id: user.id, email: user.email, username: user.username }, 
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      res.json({ token, user: { id: user.id, email: user.email, name: user.name, username: user.username, role: user.role, is_email_verified: user.is_email_verified, is_seller_verified: user.is_seller_verified } });
     } catch (error: any) {
       console.error('[LOGIN ERROR]', error);
       res.status(500).json({ error: error.message || 'Internal server error' });
@@ -140,22 +378,47 @@ async function startServer() {
     res.json({ success: true, message: 'Email verified successfully! You can now log in.' });
   });
 
+  app.post('/api/auth/resend-verification', async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    try {
+      const user: any = db.prepare('SELECT id, is_email_verified FROM users WHERE email = ?').get(email);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      if (user.is_email_verified) return res.status(400).json({ error: 'Email is already verified' });
+
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      db.prepare('UPDATE users SET verification_token = ? WHERE id = ?').run(verificationToken, user.id);
+
+      await sendVerificationEmail(email, verificationToken, req.headers.origin || 'http://localhost:3000');
+      res.json({ success: true, message: 'Verification email resent successfully!' });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post('/api/auth/forgot-password', async (req, res) => {
     const { email } = req.body;
-    const user: any = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    
-    if (user) {
-      const resetToken = crypto.randomBytes(32).toString('hex');
-      const resetTokenExpiry = new Date(Date.now() + 3600000).toISOString(); // 1 hour
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    try {
+      const user: any = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
       
-      db.prepare('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?')
-        .run(resetToken, resetTokenExpiry, user.id);
+      if (user) {
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const resetTokenExpiry = new Date(Date.now() + 3600000).toISOString(); // 1 hour
         
-      console.log(`[EMAIL SIMULATION] Password reset link for ${email}: http://localhost:3000/reset-password?token=${resetToken}`);
+        db.prepare('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?')
+          .run(resetToken, resetTokenExpiry, user.id);
+          
+        await sendForgotPasswordEmail(email, resetToken, req.headers.origin || 'http://localhost:3000');
+      }
+      
+      // Always return success to prevent email enumeration
+      res.json({ success: true, message: 'If an account exists with that email, a reset link has been sent.' });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
-    
-    // Always return success to prevent email enumeration
-    res.json({ success: true, message: 'If an account exists with that email, a reset link has been sent.' });
   });
 
   app.post('/api/auth/reset-password', async (req, res) => {
@@ -188,13 +451,13 @@ async function startServer() {
   };
 
   app.get('/api/user/profile', authenticateToken, (req: any, res) => {
-    const user: any = db.prepare('SELECT id, email, name, username, role, bio, location, avatar_url, wallet_balance, rating, is_verified, created_at FROM users WHERE id = ?').get(req.user.id);
+    const user: any = db.prepare('SELECT id, email, name, username, role, bio, location, avatar_url, cover_url, social_links, wallet_balance, rating, is_verified, is_seller_verified, created_at FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json(user);
   });
 
   app.patch('/api/user/profile', authenticateToken, (req: any, res) => {
-    const { name, username, bio, location, avatar_url } = req.body;
+    const { name, username, bio, location, avatar_url, cover_url, social_links } = req.body;
     try {
       const currentUser: any = db.prepare('SELECT username, username_updated_at FROM users WHERE id = ?').get(req.user.id);
       
@@ -222,17 +485,41 @@ async function startServer() {
             username_updated_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE username_updated_at END,
             bio = COALESCE(?, bio),
             location = COALESCE(?, location),
-            avatar_url = COALESCE(?, avatar_url)
+            avatar_url = COALESCE(?, avatar_url),
+            cover_url = COALESCE(?, cover_url),
+            social_links = COALESCE(?, social_links)
         WHERE id = ?
       `);
       
-      stmt.run(name, updateUsername ? 1 : 0, username, updateUsername ? 1 : 0, bio, location, avatar_url, req.user.id);
+      stmt.run(name, updateUsername ? 1 : 0, username, updateUsername ? 1 : 0, bio, location, avatar_url, cover_url, typeof social_links === 'object' ? JSON.stringify(social_links) : social_links, req.user.id);
       res.json({ success: true });
     } catch (error: any) {
       if (error.message.includes('UNIQUE constraint failed: users.username')) {
         return res.status(400).json({ error: 'Username already taken' });
       }
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/user/upload-avatar', authenticateToken, upload.single('avatar'), (req: any, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const avatarUrl = `/uploads/${req.file.filename}`;
+    try {
+      db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(avatarUrl, req.user.id);
+      res.json({ success: true, avatar_url: avatarUrl });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/user/upload-cover', authenticateToken, upload.single('cover'), (req: any, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const coverUrl = `/uploads/${req.file.filename}`;
+    try {
+      db.prepare('UPDATE users SET cover_url = ? WHERE id = ?').run(coverUrl, req.user.id);
+      res.json({ success: true, cover_url: coverUrl });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 
@@ -255,7 +542,7 @@ async function startServer() {
   // --- Listing Routes ---
   app.get('/api/listings', (req, res) => {
     const listings = db.prepare(`
-      SELECT l.*, u.name as seller_name, u.avatar_url as seller_avatar 
+      SELECT l.*, u.name as seller_name, u.avatar_url as seller_avatar, u.is_seller_verified 
       FROM listings l 
       JOIN users u ON l.seller_id = u.id 
       WHERE l.status != 'sold'
@@ -266,7 +553,7 @@ async function startServer() {
 
   app.get('/api/listings/:id', (req, res) => {
     const listing = db.prepare(`
-      SELECT l.*, u.name as seller_name, u.avatar_url as seller_avatar, u.rating as seller_rating,
+      SELECT l.*, u.name as seller_name, u.avatar_url as seller_avatar, u.rating as seller_rating, u.is_seller_verified,
              (SELECT COUNT(*) FROM reviews WHERE seller_id = u.id) as seller_reviews_count
       FROM listings l 
       JOIN users u ON l.seller_id = u.id 

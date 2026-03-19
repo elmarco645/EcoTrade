@@ -276,7 +276,12 @@ export default function ListingDetail({ user, addToCart }: { user: any, addToCar
               {listing.seller_name?.[0]}
             </div>
             <div>
-              <p className="font-bold">{listing.seller_name}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="font-bold">{listing.seller_name}</p>
+                {listing.is_seller_verified === 1 && (
+                  <ShieldCheck className="h-4 w-4 text-emerald-500 fill-emerald-50" />
+                )}
+              </div>
               <p className="text-sm text-slate-500">Seller since 2024</p>
             </div>
           </div>

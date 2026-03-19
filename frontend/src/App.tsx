@@ -31,10 +31,30 @@ export default function App() {
   const [cart, setCart] = useState<any[]>([]);
 
   useEffect(() => {
+    const token = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
-    if (savedUser) {
+    
+    if (token && savedUser) {
+      // Set initial user from localStorage for immediate UI feedback
       setUser(JSON.parse(savedUser));
+      
+      // Fetch latest profile data to sync state (e.g. verification status, balance)
+      fetch('/api/user/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => {
+        if (res.ok) return res.json();
+        throw new Error('Session expired');
+      })
+      .then(data => {
+        setUser(data);
+        localStorage.setItem('user', JSON.stringify(data));
+      })
+      .catch(() => {
+        handleLogout();
+      });
     }
+    
     const savedCart = localStorage.getItem('cart');
     if (savedCart) {
       setCart(JSON.parse(savedCart));

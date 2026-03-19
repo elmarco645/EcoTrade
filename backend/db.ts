@@ -19,11 +19,15 @@ db.exec(`
     rating REAL DEFAULT 0,
     is_verified INTEGER DEFAULT 0, -- Identity verification
     is_email_verified INTEGER DEFAULT 0,
+    is_seller_verified INTEGER DEFAULT 0,
+    failed_attempts INTEGER DEFAULT 0,
     verification_token TEXT,
     reset_token TEXT,
     reset_token_expiry DATETIME,
     national_id_encrypted TEXT,
     username_updated_at DATETIME,
+    cover_url TEXT,
+    social_links TEXT, -- JSON object
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -140,7 +144,11 @@ try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(use
 try { db.exec('ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN national_id_encrypted TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN username_updated_at DATETIME'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN cover_url TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN social_links TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN is_seller_verified INTEGER DEFAULT 0'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0'); } catch (e) {}
 
-try { db.exec("UPDATE users SET is_email_verified = 1 WHERE email IN ('alice@example.com', 'bob@example.com')"); } catch (e) {}
+try { db.exec("UPDATE users SET is_email_verified = 1"); } catch (e) {}
 
 export default db;

@@ -9,10 +9,39 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
   const [showPassword, setShowPassword] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState('');
   const [error, setError] = useState('');
+  const [showResend, setShowResend] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState('');
   const navigate = useNavigate();
 
   const siteKey = (import.meta as any).env.VITE_RECAPTCHA_SITE_KEY;
+
+  const handleResendVerification = async () => {
+    if (!unverifiedEmail) return;
+    setResending(true);
+    setResendSuccess('');
+    setError('');
+    try {
+      const res = await fetch('/api/auth/resend-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: unverifiedEmail }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setResendSuccess('Verification email sent! Please check your inbox.');
+        setShowResend(false);
+      } else {
+        setError(data.error);
+      }
+    } catch (err) {
+      setError('Failed to resend verification email.');
+    } finally {
+      setResending(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,6 +53,8 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
 
     setLoading(true);
     setError('');
+    setShowResend(false);
+    setResendSuccess('');
 
     try {
       const res = await fetch('/api/auth/login', {
@@ -38,7 +69,11 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
         setUser(data.user);
         navigate('/');
       } else {
-        setError(data.error);
+        setError(data.message || data.error);
+        if (data.showResend) {
+          setShowResend(true);
+          setUnverifiedEmail(data.email);
+        }
       }
     } catch (err) {
       setError('Something went wrong. Please try again.');
@@ -62,6 +97,21 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
           {error && (
             <div className="rounded-xl bg-red-50 p-4 text-sm font-medium text-red-600">
               {error}
+              {showResend && (
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={resending}
+                  className="mt-2 block w-full rounded-lg bg-red-100 py-2 text-center text-xs font-bold text-red-700 transition-all hover:bg-red-200 disabled:opacity-50"
+                >
+                  {resending ? 'Sending...' : 'Resend Verification Email'}
+                </button>
+              )}
+            </div>
+          )}
+          {resendSuccess && (
+            <div className="rounded-xl bg-emerald-50 p-4 text-sm font-medium text-emerald-600">
+              {resendSuccess}
             </div>
           )}
           <div className="space-y-4">

@@ -12,6 +12,7 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
   const [showPassword, setShowPassword] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
@@ -33,6 +34,7 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
     }
     setLoading(true);
     setError('');
+    setSuccess('');
 
     try {
       const res = await fetch('/api/auth/register', {
@@ -42,12 +44,16 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
       });
       const data = await res.json();
       if (res.ok) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        setUser(data.user);
-        navigate('/');
+        setSuccess(data.message || 'Signup successful! Please check your email to verify your account.');
+        // Clear form
+        setName('');
+        setUsername('');
+        setEmail('');
+        setPassword('');
+        setConfirmPassword('');
+        setCaptchaToken(null);
       } else {
-        setError(data.error);
+        setError(data.message || data.error);
       }
     } catch (err) {
       setError('Something went wrong. Please try again.');
@@ -83,6 +89,11 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
           {error && (
             <div className="rounded-xl bg-red-50 p-4 text-sm font-medium text-red-600">
               {error}
+            </div>
+          )}
+          {success && (
+            <div className="rounded-xl bg-emerald-50 p-4 text-sm font-medium text-emerald-600">
+              {success}
             </div>
           )}
           <div className="space-y-4">

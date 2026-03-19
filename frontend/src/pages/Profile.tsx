@@ -1,6 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Settings, Package, Star, Calendar, MapPin, Loader2, MessageSquare, CheckCircle, ShieldCheck, AtSign, X, Save, Fingerprint } from 'lucide-react';
+import { 
+  User, Settings, Package, Star, Calendar, MapPin, 
+  Loader2, MessageSquare, CheckCircle, ShieldCheck, 
+  AtSign, X, Save, Fingerprint, ExternalLink, 
+  TrendingUp, ShoppingBag, Heart, MoreHorizontal,
+  Twitter, Instagram, Globe, Share2, Camera,
+  ChevronRight, Award, Zap, Shield
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 export default function Profile({ user: initialUser }: { user: any }) {
   const navigate = useNavigate();
@@ -15,13 +23,22 @@ export default function Profile({ user: initialUser }: { user: any }) {
     username: '',
     bio: '',
     location: '',
-    avatar_url: ''
+    avatar_url: '',
+    cover_url: '',
+    social_links: {
+      twitter: '',
+      instagram: '',
+      website: ''
+    }
   });
   const [isVerifying, setIsVerifying] = useState(false);
   const [nationalId, setNationalId] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
 
   const fetchData = async () => {
     try {
@@ -37,12 +54,25 @@ export default function Profile({ user: initialUser }: { user: any }) {
 
       if (profileRes.ok) {
         setUser(profileData);
+        let socialLinks = { twitter: '', instagram: '', website: '' };
+        try {
+          if (profileData.social_links) {
+            socialLinks = typeof profileData.social_links === 'string' 
+              ? JSON.parse(profileData.social_links) 
+              : profileData.social_links;
+          }
+        } catch (e) {
+          console.error("Error parsing social links", e);
+        }
+
         setEditForm({
           name: profileData.name || '',
           username: profileData.username || '',
           bio: profileData.bio || '',
           location: profileData.location || '',
-          avatar_url: profileData.avatar_url || ''
+          avatar_url: profileData.avatar_url || '',
+          cover_url: profileData.cover_url || '',
+          social_links: socialLinks
         });
       }
       setListings(listingsData.filter((l: any) => l.seller_id === initialUser.id));
@@ -118,315 +148,673 @@ export default function Profile({ user: initialUser }: { user: any }) {
     }
   };
 
+  const handleShare = () => {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url);
+    setSuccess('Profile link copied to clipboard!');
+    setTimeout(() => setSuccess(''), 3000);
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, type: 'avatar' | 'cover') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append(type, file);
+
+    setActionLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const res = await fetch(`/api/user/upload-${type}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: formData
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setSuccess(`${type === 'avatar' ? 'Profile picture' : 'Cover image'} updated successfully`);
+        fetchData();
+      } else {
+        setError(data.error || `Failed to upload ${type}`);
+      }
+    } catch (err) {
+      setError(`Error uploading ${type}`);
+    } finally {
+      setActionLoading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
-        <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5, repeat: Infinity, repeatType: 'reverse' }}
+        >
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600" />
+        </motion.div>
       </div>
     );
   }
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-10">
-      {/* Notifications */}
-      {(error || success) && (
-        <div className={`fixed top-24 right-8 z-50 rounded-2xl p-4 shadow-2xl animate-in slide-in-from-right ${error ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
-          <p className="font-bold">{error || success}</p>
-          <button onClick={() => { setError(''); setSuccess(''); }} className="absolute top-2 right-2 opacity-50 hover:opacity-100">
-            <X size={16} />
-          </button>
-        </div>
-      )}
+  const socialLinks = typeof user.social_links === 'string' ? JSON.parse(user.social_links || '{}') : (user.social_links || {});
 
-      <div className="relative overflow-hidden rounded-[3rem] bg-white p-10 shadow-sm border border-slate-100">
-        <div className="flex flex-col items-center gap-8 md:flex-row md:items-start">
-          <div className="relative">
-            <div className="h-32 w-32 rounded-[2.5rem] bg-blue-600 flex items-center justify-center text-4xl font-bold text-white shadow-xl overflow-hidden">
-              {user.avatar_url ? (
-                <img src={user.avatar_url} alt={user.name} className="h-full w-full object-cover" />
-              ) : (
-                user.name[0]
-              )}
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      {/* Notifications */}
+      <AnimatePresence>
+        {(error || success) && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20, x: 20 }}
+            animate={{ opacity: 1, y: 0, x: 0 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className={`fixed top-24 right-8 z-50 flex items-center gap-3 rounded-2xl p-4 shadow-2xl backdrop-blur-md ${error ? 'bg-red-500/90 text-white' : 'bg-emerald-500/90 text-white'}`}
+          >
+            <div className="rounded-full bg-white/20 p-1">
+              {error ? <X size={16} /> : <CheckCircle size={16} />}
             </div>
-            <button 
-              onClick={() => setIsEditing(!isEditing)}
-              className="absolute -bottom-2 -right-2 rounded-full bg-white p-2 shadow-lg border border-slate-100 hover:text-blue-600 transition-all active:scale-95"
-            >
-              <Settings className="h-5 w-5" />
+            <p className="font-semibold">{error || success}</p>
+            <button onClick={() => { setError(''); setSuccess(''); }} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">
+              <X size={18} />
             </button>
-          </div>
-          
-          <div className="flex-1 space-y-4 text-center md:text-left">
-            <div className="space-y-1">
-              <div className="flex items-center justify-center gap-2 md:justify-start">
-                <h1 className="text-3xl font-bold">{user.name}</h1>
-                {user.is_verified === 1 && (
-                  <CheckCircle className="h-6 w-6 text-blue-500 fill-blue-50" />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+        {/* Left Column: Profile Card */}
+        <div className="lg:col-span-4 space-y-6">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="overflow-hidden rounded-[2.5rem] bg-white shadow-xl shadow-slate-200/50 border border-slate-100"
+          >
+            {/* Cover Image */}
+            <div className="h-40 bg-slate-100 relative group overflow-hidden">
+              {user.cover_url ? (
+                <img src={user.cover_url} alt="Cover" className="h-full w-full object-cover" />
+              ) : (
+                <div className="h-full w-full bg-gradient-to-br from-blue-600 via-indigo-700 to-purple-800">
+                  <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_50%_120%,rgba(255,255,255,0.8),transparent)]" />
+                </div>
+              )}
+              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
+                <button 
+                  onClick={() => coverInputRef.current?.click()} 
+                  className="rounded-full bg-white/20 backdrop-blur-md p-3 text-white hover:bg-white/40 transition-all"
+                  title="Upload Cover"
+                >
+                  <Camera size={20} />
+                </button>
+                <button 
+                  onClick={() => setIsEditing(true)} 
+                  className="rounded-full bg-white/20 backdrop-blur-md p-3 text-white hover:bg-white/40 transition-all"
+                  title="Edit Profile"
+                >
+                  <Settings size={20} />
+                </button>
+              </div>
+              <input 
+                type="file" 
+                ref={coverInputRef} 
+                className="hidden" 
+                accept="image/*" 
+                onChange={(e) => handleFileChange(e, 'cover')} 
+              />
+            </div>
+
+            <div className="px-8 pb-8">
+              <div className="relative -mt-16 mb-6 flex justify-center lg:justify-start">
+                <div className="h-32 w-32 rounded-[2.5rem] bg-white p-1.5 shadow-2xl relative group">
+                  <div className="h-full w-full rounded-[2rem] bg-slate-100 overflow-hidden flex items-center justify-center text-4xl font-black text-blue-600">
+                    {user.avatar_url ? (
+                      <img src={user.avatar_url} alt={user.name} className="h-full w-full object-cover" />
+                    ) : (
+                      user.name[0]
+                    )}
+                  </div>
+                  <button 
+                    onClick={() => avatarInputRef.current?.click()}
+                    className="absolute inset-1.5 rounded-[2rem] bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
+                  >
+                    <Camera size={24} />
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={avatarInputRef} 
+                    className="hidden" 
+                    accept="image/*" 
+                    onChange={(e) => handleFileChange(e, 'avatar')} 
+                  />
+                </div>
+                <div className="absolute bottom-0 right-0 lg:right-auto lg:left-24 flex gap-2">
+                  <motion.button 
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => setIsEditing(true)}
+                    className="rounded-2xl bg-white p-3 shadow-xl border border-slate-100 text-slate-600 hover:text-blue-600 transition-colors"
+                  >
+                    <Settings className="h-5 w-5" />
+                  </motion.button>
+                  <motion.button 
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={handleShare}
+                    className="rounded-2xl bg-white p-3 shadow-xl border border-slate-100 text-slate-600 hover:text-blue-600 transition-colors"
+                  >
+                    <Share2 className="h-5 w-5" />
+                  </motion.button>
+                </div>
+              </div>
+
+              <div className="text-center lg:text-left space-y-4">
+                <div>
+                  <div className="flex items-center justify-center lg:justify-start gap-2">
+                    <h1 className="text-2xl font-black text-slate-900 tracking-tight">{user.name}</h1>
+                    {user.is_verified === 1 && (
+                      <div className="group relative">
+                        <CheckCircle className="h-5 w-5 text-blue-500 fill-blue-50" />
+                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block rounded-lg bg-slate-900 px-2 py-1 text-[10px] text-white whitespace-nowrap">Verified Identity</span>
+                      </div>
+                    )}
+                    {user.is_seller_verified === 1 && (
+                      <div className="group relative">
+                        <ShieldCheck className="h-5 w-5 text-emerald-500 fill-emerald-50" />
+                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block rounded-lg bg-slate-900 px-2 py-1 text-[10px] text-white whitespace-nowrap">Verified Seller</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-center lg:justify-start gap-1.5 mt-1 text-slate-500">
+                    <AtSign className="h-3.5 w-3.5" />
+                    <span className="text-sm font-semibold tracking-tight">{user.username || 'no-username'}</span>
+                  </div>
+                </div>
+
+                <p className="text-sm text-slate-600 leading-relaxed font-medium">
+                  {user.bio || 'Passionate about sustainable fashion and giving pre-loved items a new home.'}
+                </p>
+
+                {/* Social Links */}
+                <div className="flex items-center justify-center lg:justify-start gap-4 pt-2">
+                  {socialLinks.twitter && (
+                    <a href={`https://twitter.com/${socialLinks.twitter}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-400 transition-colors">
+                      <Twitter size={18} />
+                    </a>
+                  )}
+                  {socialLinks.instagram && (
+                    <a href={`https://instagram.com/${socialLinks.instagram}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-pink-500 transition-colors">
+                      <Instagram size={18} />
+                    </a>
+                  )}
+                  {socialLinks.website && (
+                    <a href={socialLinks.website.startsWith('http') ? socialLinks.website : `https://${socialLinks.website}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors">
+                      <Globe size={18} />
+                    </a>
+                  )}
+                </div>
+
+                <div className="pt-4 space-y-3">
+                  <div className="flex items-center gap-3 text-sm font-semibold text-slate-600">
+                    <div className="rounded-lg bg-blue-50 p-2 text-blue-600">
+                      <MapPin size={16} />
+                    </div>
+                    {user.location || 'Nairobi, Kenya'}
+                  </div>
+                  <div className="flex items-center gap-3 text-sm font-semibold text-slate-600">
+                    <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600">
+                      <Calendar size={16} />
+                    </div>
+                    Joined {new Date(user.created_at || Date.now()).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                  </div>
+                </div>
+
+                {user.is_verified !== 1 && (
+                  <motion.button 
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setIsVerifying(true)}
+                    className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-4 text-sm font-bold text-white hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
+                  >
+                    <ShieldCheck className="h-4 w-4" />
+                    Verify Identity
+                  </motion.button>
                 )}
               </div>
-              <div className="flex items-center justify-center gap-1 text-slate-500 md:justify-start">
-                <AtSign className="h-4 w-4" />
-                <span className="font-medium">{user.username || 'no-username'}</span>
-              </div>
-              <p className="text-slate-400 text-sm">{user.email}</p>
             </div>
-            
-            <div className="flex flex-wrap justify-center gap-6 md:justify-start">
-              <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
-                <Star className="h-4 w-4 text-amber-500 fill-amber-500" />
-                {user.rating ? user.rating.toFixed(1) : 'No'} Rating
-              </div>
-              <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
-                <Calendar className="h-4 w-4 text-blue-500" />
-                Joined {new Date(user.created_at || Date.now()).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-              </div>
-              <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
-                <MapPin className="h-4 w-4 text-red-500" />
-                {user.location || 'Nairobi, Kenya'}
-              </div>
-            </div>
+          </motion.div>
 
-            <p className="max-w-xl text-slate-600 leading-relaxed">
-              {user.bio || 'Passionate about sustainable fashion and giving pre-loved items a new home. Check out my latest listings below!'}
-            </p>
-
-            {user.is_verified !== 1 && (
-              <button 
-                onClick={() => setIsVerifying(true)}
-                className="inline-flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-sm font-bold text-blue-600 hover:bg-blue-100 transition-all"
-              >
-                <ShieldCheck className="h-4 w-4" />
-                Verify Identity
-              </button>
-            )}
+          {/* Quick Actions Bento */}
+          <div className="grid grid-cols-2 gap-4">
+            <motion.button 
+              whileHover={{ y: -4 }}
+              onClick={() => navigate('/orders')}
+              className="flex flex-col items-center justify-center gap-2 rounded-3xl bg-white p-6 shadow-lg shadow-slate-100 border border-slate-100 group"
+            >
+              <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                <ShoppingBag size={20} />
+              </div>
+              <span className="text-xs font-black text-slate-900 uppercase tracking-widest">Orders</span>
+            </motion.button>
+            <motion.button 
+              whileHover={{ y: -4 }}
+              onClick={() => navigate('/offers')}
+              className="flex flex-col items-center justify-center gap-2 rounded-3xl bg-white p-6 shadow-lg shadow-slate-100 border border-slate-100 group"
+            >
+              <div className="rounded-2xl bg-amber-50 p-3 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+                <TrendingUp size={20} />
+              </div>
+              <span className="text-xs font-black text-slate-900 uppercase tracking-widest">Offers</span>
+            </motion.button>
           </div>
 
-          <div className="flex flex-col gap-4">
-            <div className="flex gap-4">
-              <div className="rounded-3xl bg-slate-50 p-6 text-center border border-slate-100 min-w-[100px]">
-                <p className="text-2xl font-black text-blue-600">{listings.length}</p>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Listings</p>
+          {/* Achievements / Badges */}
+          <div className="rounded-[2rem] bg-slate-900 p-8 text-white space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Achievements</h3>
+              <Award className="text-blue-400" size={16} />
+            </div>
+            <div className="space-y-4">
+              <div className="flex items-center gap-4">
+                <div className="h-10 w-10 rounded-xl bg-blue-500/20 flex items-center justify-center text-blue-400 border border-blue-500/30">
+                  <Zap size={18} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold">Fast Responder</p>
+                  <p className="text-[10px] text-slate-400">Replies within 1 hour</p>
+                </div>
               </div>
-              <div className="rounded-3xl bg-slate-50 p-6 text-center border border-slate-100 min-w-[100px]">
-                <p className="text-2xl font-black text-emerald-600">12</p>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Sold</p>
+              <div className="flex items-center gap-4">
+                <div className="h-10 w-10 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-400 border border-emerald-500/30">
+                  <Shield size={18} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold">Trusted Seller</p>
+                  <p className="text-[10px] text-slate-400">10+ successful trades</p>
+                </div>
               </div>
             </div>
-            
-            <div className="space-y-2">
-              <button 
-                onClick={() => navigate('/orders')}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white border border-slate-200 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-all"
+          </div>
+        </div>
+
+        {/* Right Column: Stats & Content */}
+        <div className="lg:col-span-8 space-y-8">
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[
+              { label: 'Listings', value: listings.length, icon: Package, color: 'text-blue-600', bg: 'bg-blue-50' },
+              { label: 'Sold', value: '12', icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+              { label: 'Rating', value: user.rating ? user.rating.toFixed(1) : '5.0', icon: Star, color: 'text-amber-500', bg: 'bg-amber-50' },
+              { label: 'Reviews', value: reviews.length, icon: MessageSquare, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+            ].map((stat, i) => (
+              <motion.div 
+                key={stat.label}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.1 }}
+                className="rounded-[2rem] bg-white p-6 shadow-lg shadow-slate-100 border border-slate-100 text-center"
               >
-                <Package className="h-4 w-4" />
-                My Orders
-              </button>
-              <button 
-                onClick={() => navigate('/offers')}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white border border-slate-200 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-all"
-              >
-                <Star className="h-4 w-4" />
-                Negotiations
-              </button>
+                <div className={`mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl ${stat.bg} ${stat.color}`}>
+                  <stat.icon size={20} />
+                </div>
+                <p className={`text-2xl font-black ${stat.color}`}>{stat.value}</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{stat.label}</p>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Tabs & Content */}
+          <div className="space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 relative">
+              <div className="flex gap-8">
+                {['listings', 'reviews'].map((tab) => (
+                  <button 
+                    key={tab}
+                    onClick={() => setActiveTab(tab as any)}
+                    className={`relative pb-4 text-sm font-black uppercase tracking-widest transition-colors ${activeTab === tab ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                    {tab} ({tab === 'listings' ? listings.length : reviews.length})
+                    {activeTab === tab && (
+                      <motion.div 
+                        layoutId="activeTab"
+                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
+                      />
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            <motion.div 
+              key={activeTab}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              {activeTab === 'listings' ? (
+                listings.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center rounded-[3rem] border-2 border-dashed border-slate-200 bg-slate-50/50 py-20 text-center">
+                    <div className="mb-4 rounded-full bg-white p-6 shadow-xl shadow-slate-200/50">
+                      <Package className="text-slate-300" size={48} />
+                    </div>
+                    <p className="text-lg font-bold text-slate-400">No active listings yet.</p>
+                    <button 
+                      onClick={() => navigate('/create-listing')}
+                      className="mt-4 text-sm font-black text-blue-600 uppercase tracking-widest hover:underline"
+                    >
+                      Start Selling
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+                    {listings.map((listing, i) => (
+                      <motion.div 
+                        key={listing.id}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: i * 0.05 }}
+                        whileHover={{ y: -8 }}
+                        className="group relative overflow-hidden rounded-[2rem] bg-white p-4 shadow-xl shadow-slate-200/30 border border-slate-100 transition-all"
+                      >
+                        <div className="aspect-square overflow-hidden rounded-2xl bg-slate-100 relative">
+                          <img
+                            src={JSON.parse(listing.images || '[]')[0] || `https://picsum.photos/seed/${listing.id}/400/400`}
+                            alt={listing.title}
+                            className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute top-3 right-3">
+                            <div className="rounded-full bg-white/90 backdrop-blur-md p-2 text-slate-900 shadow-lg">
+                              <Heart size={16} className="group-hover:fill-red-500 group-hover:text-red-500 transition-colors" />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-4 flex items-start justify-between">
+                          <div className="space-y-1">
+                            <h3 className="font-bold text-slate-900 line-clamp-1">{listing.title}</h3>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{listing.category}</p>
+                          </div>
+                          <p className="text-lg font-black text-blue-600">${listing.price}</p>
+                        </div>
+                        <div className="mt-4 flex items-center justify-between pt-4 border-t border-slate-50">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{listing.condition}</span>
+                          <button 
+                            onClick={() => navigate(`/listing/${listing.id}`)}
+                            className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-blue-600 hover:text-white transition-colors"
+                          >
+                            <ExternalLink size={14} />
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )
+              ) : (
+                reviews.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center rounded-[3rem] border-2 border-dashed border-slate-200 bg-slate-50/50 py-20 text-center">
+                    <div className="mb-4 rounded-full bg-white p-6 shadow-xl shadow-slate-200/50">
+                      <MessageSquare className="text-slate-300" size={48} />
+                    </div>
+                    <p className="text-lg font-bold text-slate-400">No reviews received yet.</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-6 md:grid-cols-2">
+                    {reviews.map((review, i) => (
+                      <motion.div 
+                        key={review.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.1 }}
+                        className="rounded-[2.5rem] border border-slate-100 bg-white p-8 shadow-xl shadow-slate-200/20 relative overflow-hidden"
+                      >
+                        <div className="absolute top-0 right-0 p-6 text-slate-100">
+                          <MessageSquare size={80} strokeWidth={1} />
+                        </div>
+                        <div className="relative z-10">
+                          <div className="mb-6 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center font-black text-white shadow-lg">
+                                {review.buyer_name?.[0]}
+                              </div>
+                              <div>
+                                <p className="font-black text-slate-900">{review.buyer_name}</p>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(review.created_at).toLocaleDateString()}</p>
+                              </div>
+                            </div>
+                            <div className="flex gap-0.5">
+                              {[1, 2, 3, 4, 5].map((s) => (
+                                <Star key={s} className={`h-4 w-4 ${s <= review.rating ? 'fill-amber-400 text-amber-400' : 'text-slate-200'}`} />
+                              ))}
+                            </div>
+                          </div>
+                          <p className="text-slate-600 italic leading-relaxed font-medium">"{review.review_text}"</p>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )
+              )}
+            </motion.div>
           </div>
         </div>
       </div>
 
-      {/* Edit Profile Modal */}
-      {isEditing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-[3rem] bg-white p-10 shadow-2xl animate-in zoom-in">
-            <div className="mb-8 flex items-center justify-between">
-              <h2 className="text-2xl font-bold">Edit Profile</h2>
-              <button onClick={() => setIsEditing(false)} className="rounded-full p-2 hover:bg-slate-100"><X /></button>
-            </div>
-            <form onSubmit={handleUpdateProfile} className="space-y-6">
-              <div className="grid gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Full Name</label>
-                  <input 
-                    type="text" 
-                    value={editForm.name} 
-                    onChange={(e) => setEditForm({...editForm, name: e.target.value})}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 outline-none focus:border-blue-500 focus:bg-white"
-                  />
+      {/* Modals */}
+      <AnimatePresence>
+        {isEditing && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsEditing(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-2xl rounded-[3.5rem] bg-white p-10 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="mb-8 flex items-center justify-between">
+                <h2 className="text-2xl font-black text-slate-900 tracking-tight">Edit Profile</h2>
+                <button onClick={() => setIsEditing(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+              <form onSubmit={handleUpdateProfile} className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Full Name</label>
+                      <input 
+                        type="text" 
+                        value={editForm.name} 
+                        onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Username</label>
+                      <div className="relative">
+                        <AtSign className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input 
+                          type="text" 
+                          value={editForm.username} 
+                          onChange={(e) => setEditForm({...editForm, username: e.target.value.toLowerCase().replace(/\s/g, '')})}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 pl-10 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                          placeholder="username"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Bio</label>
+                      <textarea 
+                        value={editForm.bio} 
+                        onChange={(e) => setEditForm({...editForm, bio: e.target.value})}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                        rows={3}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Avatar URL</label>
+                      <input 
+                        type="text" 
+                        value={editForm.avatar_url} 
+                        onChange={(e) => setEditForm({...editForm, avatar_url: e.target.value})}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                        placeholder="https://..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Cover URL</label>
+                      <input 
+                        type="text" 
+                        value={editForm.cover_url} 
+                        onChange={(e) => setEditForm({...editForm, cover_url: e.target.value})}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                        placeholder="https://..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Location</label>
+                      <input 
+                        type="text" 
+                        value={editForm.location} 
+                        onChange={(e) => setEditForm({...editForm, location: e.target.value})}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                      />
+                    </div>
+                  </div>
                 </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Social Links</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="relative">
+                      <Twitter className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input 
+                        type="text" 
+                        value={editForm.social_links.twitter} 
+                        onChange={(e) => setEditForm({...editForm, social_links: {...editForm.social_links, twitter: e.target.value}})}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 pl-10 text-sm font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                        placeholder="Twitter"
+                      />
+                    </div>
+                    <div className="relative">
+                      <Instagram className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input 
+                        type="text" 
+                        value={editForm.social_links.instagram} 
+                        onChange={(e) => setEditForm({...editForm, social_links: {...editForm.social_links, instagram: e.target.value}})}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 pl-10 text-sm font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                        placeholder="Instagram"
+                      />
+                    </div>
+                    <div className="relative">
+                      <Globe className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input 
+                        type="text" 
+                        value={editForm.social_links.website} 
+                        onChange={(e) => setEditForm({...editForm, social_links: {...editForm.social_links, website: e.target.value}})}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 pl-10 text-sm font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                        placeholder="Website"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="submit" 
+                  disabled={actionLoading}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 py-5 font-black text-white shadow-xl shadow-blue-200 hover:bg-blue-700 disabled:opacity-50 transition-all"
+                >
+                  {actionLoading ? <Loader2 className="animate-spin" /> : <><Save size={20} /> Save Changes</>}
+                </motion.button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {isVerifying && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsVerifying(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md rounded-[3.5rem] bg-white p-10 shadow-2xl border border-slate-100"
+            >
+              <div className="mb-8 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="rounded-2xl bg-blue-600 p-3 text-white shadow-lg shadow-blue-200">
+                    <ShieldCheck size={24} />
+                  </div>
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">Verification</h2>
+                </div>
+                <button onClick={() => setIsVerifying(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <div className="mb-8 space-y-4">
+                <div className="flex items-start gap-3 rounded-3xl bg-blue-50 p-6 text-sm font-medium text-blue-800 border border-blue-100">
+                  <ShieldCheck className="mt-1 shrink-0" size={18} />
+                  <p>Verifying your identity builds trust and unlocks higher transaction limits. Your ID is stored securely and encrypted.</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleVerifyId} className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Username</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">National ID Number</label>
                   <div className="relative">
-                    <AtSign className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <Fingerprint className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                     <input 
                       type="text" 
-                      value={editForm.username} 
-                      onChange={(e) => setEditForm({...editForm, username: e.target.value.toLowerCase().replace(/\s/g, '')})}
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 pl-10 outline-none focus:border-blue-500 focus:bg-white"
-                      placeholder="username"
+                      required
+                      value={nationalId} 
+                      onChange={(e) => setNationalId(e.target.value)}
+                      placeholder="Enter ID Number"
+                      className="h-16 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 font-semibold outline-none transition-all focus:border-blue-500 focus:bg-white"
                     />
                   </div>
-                  <p className="text-[10px] text-slate-400">Can only be changed once every 30 days.</p>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Bio</label>
-                  <textarea 
-                    value={editForm.bio} 
-                    onChange={(e) => setEditForm({...editForm, bio: e.target.value})}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 outline-none focus:border-blue-500 focus:bg-white"
-                    rows={3}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Location</label>
-                  <input 
-                    type="text" 
-                    value={editForm.location} 
-                    onChange={(e) => setEditForm({...editForm, location: e.target.value})}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 outline-none focus:border-blue-500 focus:bg-white"
-                  />
-                </div>
-              </div>
-              <button 
-                type="submit" 
-                disabled={actionLoading}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 py-4 font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {actionLoading ? <Loader2 className="animate-spin" /> : <><Save size={20} /> Save Changes</>}
-              </button>
-            </form>
+                
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="submit" 
+                  disabled={actionLoading}
+                  className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 font-black text-white shadow-xl shadow-slate-200 hover:bg-slate-800 disabled:opacity-50 transition-all"
+                >
+                  {actionLoading ? <Loader2 className="animate-spin" /> : 'Verify Identity'}
+                </motion.button>
+                
+                <p className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  Secure Encryption Enabled
+                </p>
+              </form>
+            </motion.div>
           </div>
-        </div>
-      )}
-
-      {/* Identity Verification Modal */}
-      {isVerifying && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-[3rem] bg-white p-10 shadow-2xl animate-in zoom-in">
-            <div className="mb-8 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-blue-600 p-2 text-white">
-                  <ShieldCheck size={24} />
-                </div>
-                <h2 className="text-2xl font-bold">Identity Verification</h2>
-              </div>
-              <button onClick={() => setIsVerifying(false)} className="rounded-full p-2 hover:bg-slate-100"><X /></button>
-            </div>
-            
-            <div className="mb-8 space-y-4">
-              <div className="flex items-start gap-3 rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">
-                <ShieldCheck className="mt-1 shrink-0" size={18} />
-                <p>Verifying your identity builds trust and unlocks higher transaction limits. Your ID is stored securely and encrypted.</p>
-              </div>
-            </div>
-
-            <form onSubmit={handleVerifyId} className="space-y-6">
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">National ID Number</label>
-                <div className="relative">
-                  <Fingerprint className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-                  <input 
-                    type="text" 
-                    required
-                    value={nationalId} 
-                    onChange={(e) => setNationalId(e.target.value)}
-                    placeholder="Enter ID Number"
-                    className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white"
-                  />
-                </div>
-              </div>
-              
-              <button 
-                type="submit" 
-                disabled={actionLoading}
-                className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {actionLoading ? <Loader2 className="animate-spin" /> : 'Verify Now'}
-              </button>
-              
-              <p className="text-center text-[10px] text-slate-400">
-                By clicking verify, you agree to our data protection policy.
-              </p>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <div className="space-y-8">
-        <div className="flex items-center justify-between border-b border-slate-100">
-          <div className="flex gap-8">
-            <button 
-              onClick={() => setActiveTab('listings')}
-              className={`pb-4 text-lg font-bold transition-all ${activeTab === 'listings' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
-            >
-              My Listings ({listings.length})
-            </button>
-            <button 
-              onClick={() => setActiveTab('reviews')}
-              className={`pb-4 text-lg font-bold transition-all ${activeTab === 'reviews' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
-            >
-              Reviews ({reviews.length})
-            </button>
-          </div>
-        </div>
-
-        {activeTab === 'listings' ? (
-          listings.length === 0 ? (
-            <div className="rounded-[2.5rem] border-2 border-dashed border-slate-200 p-20 text-center">
-              <Package className="mx-auto mb-4 opacity-10" size={64} />
-              <p className="text-lg font-medium text-slate-400">You haven't listed anything yet.</p>
-            </div>
-          ) : (
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {listings.map((listing) => (
-                <div key={listing.id} className="group relative overflow-hidden rounded-3xl bg-white p-4 shadow-sm border border-slate-100 transition-all hover:shadow-xl">
-                  <div className="aspect-square overflow-hidden rounded-2xl bg-slate-100">
-                    <img
-                      src={JSON.parse(listing.images || '[]')[0] || `https://picsum.photos/seed/${listing.id}/400/400`}
-                      alt={listing.title}
-                      className="h-full w-full object-cover transition-transform group-hover:scale-110"
-                      referrerPolicy="no-referrer"
-                    />
-                  </div>
-                  <div className="mt-4 space-y-1">
-                    <h3 className="font-bold text-slate-900">{listing.title}</h3>
-                    <p className="text-lg font-black text-blue-600">${listing.price}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )
-        ) : (
-          reviews.length === 0 ? (
-            <div className="rounded-[2.5rem] border-2 border-dashed border-slate-200 p-20 text-center">
-              <MessageSquare className="mx-auto mb-4 opacity-10" size={64} />
-              <p className="text-lg font-medium text-slate-400">No reviews yet.</p>
-            </div>
-          ) : (
-            <div className="grid gap-6 md:grid-cols-2">
-              {reviews.map((review) => (
-                <div key={review.id} className="rounded-3xl border border-slate-100 bg-white p-8 shadow-sm">
-                  <div className="mb-4 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center font-bold text-blue-600">
-                        {review.buyer_name?.[0]}
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold">{review.buyer_name}</p>
-                        <p className="text-[10px] text-slate-400 uppercase tracking-widest">{new Date(review.created_at).toLocaleDateString()}</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-0.5">
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <Star key={s} className={`h-4 w-4 ${s <= review.rating ? 'fill-amber-400 text-amber-400' : 'text-slate-200'}`} />
-                      ))}
-                    </div>
-                  </div>
-                  <p className="text-slate-600 italic leading-relaxed">"{review.review_text}"</p>
-                </div>
-              ))}
-            </div>
-          )
         )}
-      </div>
+      </AnimatePresence>
     </div>
   );
 }
