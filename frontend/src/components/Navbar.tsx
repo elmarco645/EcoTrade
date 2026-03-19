@@ -17,7 +17,7 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [listings, setListings] = useState<any[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     fetch('/api/listings')
@@ -62,6 +62,17 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
     setShowSuggestions(false);
     setIsMobileSearchOpen(false);
     navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+  };
+
+  const getGreeting = (name: string) => {
+    const hour = new Date().getHours();
+    let greetingText = "Hi";
+    if (hour < 12) greetingText = "Good morning";
+    else if (hour < 18) greetingText = "Good afternoon";
+    else greetingText = "Good evening";
+    
+    const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
+    return `${greetingText}, ${capitalized}`;
   };
 
   return (
@@ -158,7 +169,10 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
           </Link>
 
           {user ? (
-            <>
+            <div className="flex items-center gap-3 md:gap-4">
+              <span className="hidden text-sm font-medium text-slate-600 lg:block">
+                {getGreeting(user.username || user.name || 'User')}
+              </span>
               <Link to="/chat" className="relative flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-blue-600">
                 <MessageSquare className="h-4 w-4" />
                 <span>Messages</span>
@@ -220,7 +234,7 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
                   </div>
                 )}
               </div>
-            </>
+            </div>
           ) : (
             <div className="flex items-center gap-4">
               <Link to="/login" className="text-sm font-medium text-slate-600 hover:text-blue-600">

@@ -10,9 +10,12 @@ export default function Offers({ user }: { user: any }) {
   const [activeTab, setActiveTab] = useState<'received' | 'sent'>('received');
 
   useEffect(() => {
-    if (!user) return navigate('/login');
-    fetchOffers();
-  }, [user]);
+    if (!user) {
+      navigate('/login');
+    } else {
+      fetchOffers();
+    }
+  }, [user, navigate]);
 
   const fetchOffers = async () => {
     try {

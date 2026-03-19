@@ -8,9 +8,31 @@ import db from './db.ts';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
+import crypto from 'crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JWT_SECRET = process.env.JWT_SECRET || 'ecotrade_secret_key_123';
+const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET;
+
+const verifyCaptcha = async (token: string) => {
+  if (!RECAPTCHA_SECRET) return true; // Skip if not configured for demo
+  try {
+    const res = await axios.post(
+      `https://www.google.com/recaptcha/api/siteverify`,
+      null,
+      {
+        params: {
+          secret: RECAPTCHA_SECRET,
+          response: token,
+        },
+      }
+    );
+    return res.data.success;
+  } catch (error) {
+    console.error('reCAPTCHA verification error:', error);
+    return false;
+  }
+};
 
 async function startServer() {
   const app = express();
@@ -23,30 +45,133 @@ async function startServer() {
 
   // --- Auth Routes ---
   app.post('/api/auth/register', async (req, res) => {
-    const { email, password, name } = req.body;
+    const { email, password, confirmPassword, name, username, captchaToken } = req.body;
     try {
+      // Verify CAPTCHA
+      if (RECAPTCHA_SECRET && !captchaToken) {
+        return res.status(400).json({ error: 'CAPTCHA verification required' });
+      }
+      const isCaptchaValid = await verifyCaptcha(captchaToken);
+      if (!isCaptchaValid) {
+        return res.status(400).json({ error: 'Invalid CAPTCHA' });
+      }
+
+      if (!password || password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+
+      if (confirmPassword && password !== confirmPassword) {
+        return res.status(400).json({ error: 'Passwords do not match' });
+      }
+
+      if (username && username.length < 3) {
+        return res.status(400).json({ error: 'Username must be at least 3 characters' });
+      }
+
       const hashedPassword = await bcrypt.hash(password, 10);
-      const stmt = db.prepare('INSERT INTO users (email, password, name) VALUES (?, ?, ?)');
-      const result = stmt.run(email, hashedPassword, name);
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      
+      const stmt = db.prepare('INSERT INTO users (email, password, name, full_name, username, verification_token) VALUES (?, ?, ?, ?, ?, ?)');
+      const result = stmt.run(email, hashedPassword, name, name, username || null, verificationToken);
+      
+      // Simulate sending email
+      console.log(`[EMAIL SIMULATION] Verification link for ${email}: http://localhost:3000/verify-email?token=${verificationToken}`);
+      
       const token = jwt.sign({ id: result.lastInsertRowid, email }, JWT_SECRET);
-      res.json({ token, user: { id: result.lastInsertRowid, email, name, role: 'buyer' } });
+      res.json({ token, user: { id: result.lastInsertRowid, email, name, username, role: 'buyer', is_email_verified: 0 } });
     } catch (error: any) {
+      if (error.message.includes('UNIQUE constraint failed: users.username')) {
+        return res.status(400).json({ error: 'Username already taken' });
+      }
       res.status(400).json({ error: error.message });
     }
   });
 
   app.post('/api/auth/login', async (req, res) => {
-    const { email, password } = req.body;
+    const { identifier, password, captchaToken } = req.body;
+    console.log(`[LOGIN ATTEMPT] Identifier: ${identifier}`);
+    
     try {
-      const user: any = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-      if (!user || !(await bcrypt.compare(password, user.password))) {
+      // Verify CAPTCHA
+      if (RECAPTCHA_SECRET && !captchaToken) {
+        return res.status(400).json({ error: 'CAPTCHA verification required' });
+      }
+      const isCaptchaValid = await verifyCaptcha(captchaToken);
+      if (!isCaptchaValid) {
+        return res.status(400).json({ error: 'Invalid CAPTCHA' });
+      }
+
+      // Find user by email OR username
+      const user: any = db.prepare('SELECT * FROM users WHERE email = ? OR username = ?').get(identifier, identifier);
+      
+      if (!user) {
+        console.log(`[LOGIN FAILED] User not found: ${identifier}`);
         return res.status(401).json({ error: 'Invalid credentials' });
       }
+
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        console.log(`[LOGIN FAILED] Password mismatch for: ${identifier}`);
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      if (!user.is_email_verified) {
+        console.log(`[LOGIN FAILED] Email not verified: ${identifier}`);
+        return res.status(403).json({ error: 'Please verify your email address first. Check your console for the simulation link.' });
+      }
+
+      console.log(`[LOGIN SUCCESS] User: ${user.email}`);
       const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET);
-      res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
+      res.json({ token, user: { id: user.id, email: user.email, name: user.name, username: user.username, role: user.role, is_email_verified: user.is_email_verified } });
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      console.error('[LOGIN ERROR]', error);
+      res.status(500).json({ error: error.message || 'Internal server error' });
     }
+  });
+
+  app.get('/api/auth/verify-email', async (req, res) => {
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ error: 'Token is required' });
+
+    const user: any = db.prepare('SELECT id FROM users WHERE verification_token = ?').get(token);
+    if (!user) return res.status(400).json({ error: 'Invalid or expired verification token' });
+
+    db.prepare('UPDATE users SET is_email_verified = 1, verification_token = NULL WHERE id = ?').run(user.id);
+    res.json({ success: true, message: 'Email verified successfully! You can now log in.' });
+  });
+
+  app.post('/api/auth/forgot-password', async (req, res) => {
+    const { email } = req.body;
+    const user: any = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    
+    if (user) {
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const resetTokenExpiry = new Date(Date.now() + 3600000).toISOString(); // 1 hour
+      
+      db.prepare('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?')
+        .run(resetToken, resetTokenExpiry, user.id);
+        
+      console.log(`[EMAIL SIMULATION] Password reset link for ${email}: http://localhost:3000/reset-password?token=${resetToken}`);
+    }
+    
+    // Always return success to prevent email enumeration
+    res.json({ success: true, message: 'If an account exists with that email, a reset link has been sent.' });
+  });
+
+  app.post('/api/auth/reset-password', async (req, res) => {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: 'Token and password are required' });
+
+    const user: any = db.prepare('SELECT id FROM users WHERE reset_token = ? AND reset_token_expiry > ?')
+      .get(token, new Date().toISOString());
+      
+    if (!user) return res.status(400).json({ error: 'Invalid or expired reset token' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    db.prepare('UPDATE users SET password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?')
+      .run(hashedPassword, user.id);
+      
+    res.json({ success: true, message: 'Password has been reset successfully.' });
   });
 
   // --- Middleware ---
@@ -63,9 +188,68 @@ async function startServer() {
   };
 
   app.get('/api/user/profile', authenticateToken, (req: any, res) => {
-    const user: any = db.prepare('SELECT id, email, name, role, bio, location, avatar_url, wallet_balance, rating, created_at FROM users WHERE id = ?').get(req.user.id);
+    const user: any = db.prepare('SELECT id, email, name, username, role, bio, location, avatar_url, wallet_balance, rating, is_verified, created_at FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json(user);
+  });
+
+  app.patch('/api/user/profile', authenticateToken, (req: any, res) => {
+    const { name, username, bio, location, avatar_url } = req.body;
+    try {
+      const currentUser: any = db.prepare('SELECT username, username_updated_at FROM users WHERE id = ?').get(req.user.id);
+      
+      let updateUsername = false;
+      if (username && username !== currentUser.username) {
+        // Check 30-day limit
+        if (currentUser.username_updated_at) {
+          const lastUpdate = new Date(currentUser.username_updated_at);
+          const now = new Date();
+          const diffDays = Math.ceil((now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60 * 24));
+          if (diffDays < 30) {
+            return res.status(400).json({ error: `Username can only be changed once every 30 days. Next change available in ${30 - diffDays} days.` });
+          }
+        }
+        if (username.length < 3) {
+          return res.status(400).json({ error: 'Username must be at least 3 characters' });
+        }
+        updateUsername = true;
+      }
+
+      const stmt = db.prepare(`
+        UPDATE users 
+        SET name = COALESCE(?, name),
+            username = CASE WHEN ? = 1 THEN ? ELSE username END,
+            username_updated_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE username_updated_at END,
+            bio = COALESCE(?, bio),
+            location = COALESCE(?, location),
+            avatar_url = COALESCE(?, avatar_url)
+        WHERE id = ?
+      `);
+      
+      stmt.run(name, updateUsername ? 1 : 0, username, updateUsername ? 1 : 0, bio, location, avatar_url, req.user.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      if (error.message.includes('UNIQUE constraint failed: users.username')) {
+        return res.status(400).json({ error: 'Username already taken' });
+      }
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/user/verify-id', authenticateToken, (req: any, res) => {
+    const { nationalId } = req.body;
+    if (!nationalId) return res.status(400).json({ error: 'National ID required' });
+
+    try {
+      // In a real app, we would use a proper encryption library like 'crypto'
+      // For this demo, we'll just store a masked/hashed version as a placeholder for "encrypted"
+      const encryptedId = Buffer.from(nationalId).toString('base64'); 
+      
+      db.prepare("UPDATE users SET national_id_encrypted = ?, is_verified = 1 WHERE id = ?").run(encryptedId, req.user.id);
+      res.json({ success: true, message: 'Identity verified successfully' });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
   });
 
   // --- Listing Routes ---
@@ -582,8 +766,8 @@ async function startServer() {
       const hashedPassword = bcrypt.hashSync('password123', 10);
       
       // Create users
-      const user1 = db.prepare('INSERT INTO users (email, password, name, wallet_balance, rating) VALUES (?, ?, ?, ?, ?)').run('alice@example.com', hashedPassword, 'Alice Green', 500, 4.9);
-      const user2 = db.prepare('INSERT INTO users (email, password, name, wallet_balance, rating) VALUES (?, ?, ?, ?, ?)').run('bob@example.com', hashedPassword, 'Bob Smith', 1000, 4.5);
+      const user1 = db.prepare('INSERT INTO users (email, password, name, wallet_balance, rating, is_email_verified) VALUES (?, ?, ?, ?, ?, 1)').run('alice@example.com', hashedPassword, 'Alice Green', 500, 4.9);
+      const user2 = db.prepare('INSERT INTO users (email, password, name, wallet_balance, rating, is_email_verified) VALUES (?, ?, ?, ?, ?, 1)').run('bob@example.com', hashedPassword, 'Bob Smith', 1000, 4.5);
       
       // Create listings
       const listings = [

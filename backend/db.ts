@@ -9,12 +9,21 @@ db.exec(`
     email TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     name TEXT NOT NULL,
+    full_name TEXT,
+    username TEXT UNIQUE,
     role TEXT DEFAULT 'buyer',
     bio TEXT,
     location TEXT,
     avatar_url TEXT,
     wallet_balance REAL DEFAULT 1000.0, -- Starting balance for demo
     rating REAL DEFAULT 0,
+    is_verified INTEGER DEFAULT 0, -- Identity verification
+    is_email_verified INTEGER DEFAULT 0,
+    verification_token TEXT,
+    reset_token TEXT,
+    reset_token_expiry DATETIME,
+    national_id_encrypted TEXT,
+    username_updated_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -103,5 +112,35 @@ db.exec(`
 try { db.exec('ALTER TABLE transactions ADD COLUMN payment_method TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE transactions ADD COLUMN payment_reference TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE transactions ADD COLUMN gateway_response TEXT'); } catch (e) {}
+
+// Robust migration for users table
+const tableInfo = db.prepare("PRAGMA table_info(users)").all();
+const columns = (tableInfo as any[]).map(col => col.name);
+
+if (!columns.includes('username')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN username TEXT'); } catch (e) { console.error('Error adding username column:', e); }
+}
+if (!columns.includes('full_name')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN full_name TEXT'); } catch (e) { console.error('Error adding full_name column:', e); }
+}
+if (!columns.includes('is_email_verified')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN is_email_verified INTEGER DEFAULT 0'); } catch (e) { console.error('Error adding is_email_verified column:', e); }
+}
+if (!columns.includes('verification_token')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN verification_token TEXT'); } catch (e) { console.error('Error adding verification_token column:', e); }
+}
+if (!columns.includes('reset_token')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN reset_token TEXT'); } catch (e) { console.error('Error adding reset_token column:', e); }
+}
+if (!columns.includes('reset_token_expiry')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN reset_token_expiry DATETIME'); } catch (e) { console.error('Error adding reset_token_expiry column:', e); }
+}
+
+try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN national_id_encrypted TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN username_updated_at DATETIME'); } catch (e) {}
+
+try { db.exec("UPDATE users SET is_email_verified = 1 WHERE email IN ('alice@example.com', 'bob@example.com')"); } catch (e) {}
 
 export default db;

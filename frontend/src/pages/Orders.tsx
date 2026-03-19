@@ -22,9 +22,12 @@ export default function Orders({ user }: { user: any }) {
   };
 
   useEffect(() => {
-    if (!user) return navigate('/login');
-    fetchOrders();
-  }, [user]);
+    if (!user) {
+      navigate('/login');
+    } else {
+      fetchOrders();
+    }
+  }, [user, navigate]);
 
   const fetchOrders = async () => {
     try {

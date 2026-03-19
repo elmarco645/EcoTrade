@@ -1,17 +1,36 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, User, Loader2 } from 'lucide-react';
+import { Mail, Lock, User, AtSign, Loader2, Eye, EyeOff, Check, X } from 'lucide-react';
+import ReCAPTCHA from 'react-google-recaptcha';
 
 export default function Register({ setUser }: { setUser: (user: any) => void }) {
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
+  const siteKey = (import.meta as any).env.VITE_RECAPTCHA_SITE_KEY;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (siteKey && !captchaToken) {
+      setError('Please complete the CAPTCHA');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
     setLoading(true);
     setError('');
 
@@ -19,7 +38,7 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify({ name, username, email, password, confirmPassword, captchaToken }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -36,6 +55,18 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
       setLoading(false);
     }
   };
+
+  const strength = (() => {
+    let score = 0;
+    if (password.length >= 8) score++;
+    if (/[A-Z]/.test(password)) score++;
+    if (/[0-9]/.test(password)) score++;
+    if (/[^A-Za-z0-9]/.test(password)) score++;
+    return score;
+  })();
+
+  const strengthColor = ['bg-slate-200', 'bg-red-500', 'bg-amber-500', 'bg-blue-500', 'bg-emerald-500'][strength];
+  const strengthText = ['', 'Weak', 'Fair', 'Good', 'Strong'][strength];
 
   return (
     <div className="flex min-h-[80vh] items-center justify-center">
@@ -67,6 +98,17 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
               />
             </div>
             <div className="relative">
+              <AtSign className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s/g, ''))}
+                placeholder="Username"
+                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+              />
+            </div>
+            <div className="relative">
               <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
               <input
                 type="email"
@@ -80,19 +122,90 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
             <div className="relative">
               <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password"
-                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-12 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              </button>
+            </div>
+            
+            {password && (
+              <div className="space-y-2 px-1">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500 font-medium">Password Strength: {strengthText}</span>
+                </div>
+                <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-500 ${strengthColor}`}
+                    style={{ width: `${(strength / 4) * 100}%` }}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                  <div className={`flex items-center gap-1.5 text-[10px] ${password.length >= 8 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {password.length >= 8 ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                    8+ characters
+                  </div>
+                  <div className={`flex items-center gap-1.5 text-[10px] ${/[A-Z]/.test(password) ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {/[A-Z]/.test(password) ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                    Uppercase
+                  </div>
+                  <div className={`flex items-center gap-1.5 text-[10px] ${/[0-9]/.test(password) ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {/[0-9]/.test(password) ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                    Number
+                  </div>
+                  <div className={`flex items-center gap-1.5 text-[10px] ${/[^A-Za-z0-9]/.test(password) ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {/[^A-Za-z0-9]/.test(password) ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                    Special char
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+              <input
+                type={showPassword ? "text" : "password"}
+                required
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm Password"
+                className={`h-14 w-full rounded-2xl border bg-slate-50 pl-12 pr-4 outline-none transition-all focus:bg-white focus:ring-4 ${
+                  confirmPassword && password !== confirmPassword 
+                    ? 'border-red-500 focus:border-red-500 focus:ring-red-50' 
+                    : 'border-slate-200 focus:border-blue-500 focus:ring-blue-50'
+                }`}
               />
             </div>
+            {confirmPassword && password !== confirmPassword && (
+              <p className="text-xs font-medium text-red-500 ml-2">Passwords do not match</p>
+            )}
           </div>
+
+          {siteKey ? (
+            <div className="flex justify-center">
+              <ReCAPTCHA
+                sitekey={siteKey}
+                onChange={(token) => setCaptchaToken(token)}
+              />
+            </div>
+          ) : (
+            <div className="rounded-xl bg-amber-50 p-4 text-xs text-amber-600">
+              reCAPTCHA is not configured. Please add VITE_RECAPTCHA_SITE_KEY to your environment variables.
+            </div>
+          )}
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || (siteKey && !captchaToken)}
             className="flex h-14 w-full items-center justify-center rounded-2xl bg-blue-600 text-lg font-bold text-white transition-all hover:bg-blue-700 disabled:opacity-50"
           >
             {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : 'Create Account'}
