@@ -21,6 +21,11 @@ const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET;
 const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS; // App Password for Gmail
 
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
+const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
+
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -81,6 +86,33 @@ const sendVerificationEmail = async (email: string, token: string, origin: strin
   } catch (error) {
     console.error('Error sending verification email:', error);
     throw new Error('Failed to send verification email');
+  }
+};
+
+const sendDeleteUndoEmail = async (email: string, token: string, origin: string) => {
+  if (!EMAIL_USER || !EMAIL_PASS) {
+    console.warn('Email credentials missing. Delete undo email simulation only.');
+    console.log(`[EMAIL SIMULATION] Undo delete link for ${email}: ${origin}/undo-delete?token=${token}`);
+    return;
+  }
+
+  const link = `${origin}/undo-delete?token=${token}`;
+
+  try {
+    await transporter.sendMail({
+      from: `"EcoTrade" <${EMAIL_USER}>`,
+      to: email,
+      subject: 'Account Deletion Scheduled',
+      html: emailTemplate(
+        "Account Deletion Scheduled",
+        "Your account has been scheduled for deletion. If this wasn't you, or if you've changed your mind, you have 7 days to restore your account by clicking the button below.",
+        "Restore Account",
+        link
+      )
+    });
+    console.log(`Delete undo email sent to ${email}`);
+  } catch (error) {
+    console.error('Error sending delete undo email:', error);
   }
 };
 
@@ -344,6 +376,13 @@ async function startServer() {
       // Reset failed attempts on success
       db.prepare('UPDATE users SET failed_attempts = 0 WHERE id = ?').run(user.id);
 
+      if (user.deleted_at) {
+        return res.status(403).json({ 
+          error: 'Account scheduled for deletion', 
+          message: 'This account is scheduled for deletion. Please check your email for the restoration link if you wish to undo this.' 
+        });
+      }
+
       if (!user.is_email_verified) {
         console.log(`[LOGIN FAILED] Email not verified: ${identifier}`);
         return res.status(403).json({ 
@@ -437,6 +476,130 @@ async function startServer() {
     res.json({ success: true, message: 'Password has been reset successfully.' });
   });
 
+  // --- OAuth Routes ---
+  app.get('/api/auth/google/url', (req, res) => {
+    if (!GOOGLE_CLIENT_ID) return res.status(500).json({ error: 'Google OAuth not configured' });
+    const origin = req.headers.origin || process.env.APP_URL || 'http://localhost:3000';
+    const redirectUri = `${origin}/auth/callback`;
+    const params = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid email profile',
+      state: 'google',
+      access_type: 'offline',
+      prompt: 'consent'
+    });
+    res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` });
+  });
+
+  app.get('/api/auth/github/url', (req, res) => {
+    if (!GITHUB_CLIENT_ID) return res.status(500).json({ error: 'GitHub OAuth not configured' });
+    const origin = req.headers.origin || process.env.APP_URL || 'http://localhost:3000';
+    const redirectUri = `${origin}/auth/callback`;
+    const params = new URLSearchParams({
+      client_id: GITHUB_CLIENT_ID,
+      redirect_uri: redirectUri,
+      scope: 'user:email',
+      state: 'github'
+    });
+    res.json({ url: `https://github.com/login/oauth/authorize?${params.toString()}` });
+  });
+
+  app.get('/auth/callback', async (req, res) => {
+    const { code, state } = req.query;
+    if (!code) return res.status(400).send('Code is required');
+
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const redirectUri = `${origin}/auth/callback`;
+
+    try {
+      let user: any = null;
+      if (state === 'google') {
+        const tokenRes = await axios.post('https://oauth2.googleapis.com/token', {
+          code,
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: GOOGLE_CLIENT_SECRET,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code'
+        });
+        const { access_token } = tokenRes.data;
+        const userRes = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${access_token}` }
+        });
+        const googleUser = userRes.data; // { id, email, name, picture }
+        
+        user = db.prepare('SELECT * FROM users WHERE google_id = ? OR email = ?').get(googleUser.id, googleUser.email);
+        if (!user) {
+          const username = googleUser.email.split('@')[0] + Math.floor(Math.random() * 1000);
+          const result = db.prepare('INSERT INTO users (email, password, name, username, google_id, is_email_verified, avatar_url) VALUES (?, ?, ?, ?, ?, 1, ?)')
+            .run(googleUser.email, 'OAUTH_USER', googleUser.name, username, googleUser.id, googleUser.picture);
+          user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+        } else if (!user.google_id) {
+          db.prepare('UPDATE users SET google_id = ?, is_email_verified = 1 WHERE id = ?').run(googleUser.id, user.id);
+        }
+      } else if (state === 'github') {
+        const tokenRes = await axios.post('https://github.com/login/oauth/access_token', {
+          code,
+          client_id: GITHUB_CLIENT_ID,
+          client_secret: GITHUB_CLIENT_SECRET,
+          redirect_uri: redirectUri
+        }, { headers: { Accept: 'application/json' } });
+        const { access_token } = tokenRes.data;
+        const userRes = await axios.get('https://api.github.com/user', {
+          headers: { Authorization: `Bearer ${access_token}` }
+        });
+        const githubUser = userRes.data; // { id, email, name, login, avatar_url }
+        
+        let email = githubUser.email;
+        if (!email) {
+          const emailsRes = await axios.get('https://api.github.com/user/emails', {
+            headers: { Authorization: `Bearer ${access_token}` }
+          });
+          email = emailsRes.data.find((e: any) => e.primary && e.verified)?.email || emailsRes.data[0]?.email;
+        }
+
+        user = db.prepare('SELECT * FROM users WHERE github_id = ? OR email = ?').get(githubUser.id.toString(), email);
+        if (!user) {
+          const username = githubUser.login + Math.floor(Math.random() * 1000);
+          const result = db.prepare('INSERT INTO users (email, password, name, username, github_id, is_email_verified, avatar_url) VALUES (?, ?, ?, ?, ?, 1, ?)')
+            .run(email, 'OAUTH_USER', githubUser.name || githubUser.login, username, githubUser.id.toString(), githubUser.avatar_url);
+          user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+        } else if (!user.github_id) {
+          db.prepare('UPDATE users SET github_id = ?, is_email_verified = 1 WHERE id = ?').run(githubUser.id.toString(), user.id);
+        }
+      }
+
+      if (user) {
+        const token = jwt.sign({ id: user.id, email: user.email, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+        res.send(`
+          <html>
+            <body>
+              <script>
+                if (window.opener) {
+                  window.opener.postMessage({ 
+                    type: 'OAUTH_AUTH_SUCCESS', 
+                    token: '${token}', 
+                    user: ${JSON.stringify({ id: user.id, email: user.email, name: user.name, username: user.username, role: user.role, is_email_verified: user.is_email_verified })} 
+                  }, '*');
+                  window.close();
+                } else {
+                  window.location.href = '/';
+                }
+              </script>
+              <p>Authentication successful. This window should close automatically.</p>
+            </body>
+          </html>
+        `);
+      } else {
+        res.status(400).send('Authentication failed');
+      }
+    } catch (error: any) {
+      console.error('OAuth Error:', error.response?.data || error.message);
+      res.status(500).send('Internal Server Error during OAuth');
+    }
+  });
+
   // --- Middleware ---
   const authenticateToken = (req: any, res: any, next: any) => {
     const authHeader = req.headers['authorization'];
@@ -445,6 +608,13 @@ async function startServer() {
 
     jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
       if (err) return res.sendStatus(403);
+      
+      // Check if user is deleted
+      const dbUser: any = db.prepare('SELECT deleted_at FROM users WHERE id = ?').get(user.id);
+      if (dbUser && dbUser.deleted_at) {
+        return res.status(403).json({ error: 'Account scheduled for deletion' });
+      }
+
       req.user = user;
       next();
     });
@@ -536,6 +706,86 @@ async function startServer() {
       res.json({ success: true, message: 'Identity verified successfully' });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/user/export-data', authenticateToken, (req: any, res) => {
+    try {
+      const user: any = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+      const listings = db.prepare('SELECT * FROM listings WHERE seller_id = ?').all(req.user.id);
+      const transactions = db.prepare('SELECT * FROM transactions WHERE buyer_id = ? OR seller_id = ?').all(req.user.id, req.user.id);
+      const offers = db.prepare('SELECT * FROM offers WHERE buyer_id = ? OR seller_id = ?').all(req.user.id, req.user.id);
+      const reviews = db.prepare('SELECT * FROM reviews WHERE buyer_id = ? OR seller_id = ?').all(req.user.id, req.user.id);
+      const messages = db.prepare('SELECT * FROM messages WHERE sender_id = ? OR receiver_id = ?').all(req.user.id, req.user.id);
+
+      // Remove sensitive info
+      delete user.password;
+      delete user.verification_token;
+      delete user.reset_token;
+      delete user.reset_token_expiry;
+      delete user.delete_token;
+      delete user.delete_expires;
+
+      const exportData = {
+        profile: user,
+        listings,
+        transactions,
+        offers,
+        reviews,
+        messages,
+        exported_at: new Date().toISOString()
+      };
+
+      res.setHeader('Content-Disposition', 'attachment; filename=ecotrade_data_export.json');
+      res.json(exportData);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/user/delete-account', authenticateToken, async (req: any, res) => {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'Password required' });
+
+    try {
+      const user: any = db.prepare('SELECT password, email FROM users WHERE id = ?').get(req.user.id);
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) return res.status(401).json({ error: 'Incorrect password' });
+
+      const deleteToken = crypto.randomBytes(32).toString('hex');
+      const expires = new Date();
+      expires.setDate(expires.getDate() + 7); // 7 days
+
+      db.prepare('UPDATE users SET deleted_at = CURRENT_TIMESTAMP, delete_token = ?, delete_expires = ? WHERE id = ?')
+        .run(deleteToken, expires.toISOString(), req.user.id);
+
+      await sendDeleteUndoEmail(user.email, deleteToken, req.headers.origin || 'http://localhost:3000');
+
+      res.json({ success: true, message: 'Account scheduled for deletion. You have 7 days to undo this.' });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/user/undo-delete', async (req, res) => {
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ error: 'Token required' });
+
+    try {
+      const user: any = db.prepare('SELECT id, delete_expires FROM users WHERE delete_token = ?').get(token);
+      if (!user) return res.status(400).json({ error: 'Invalid or expired token' });
+
+      const expires = new Date(user.delete_expires);
+      if (new Date() > expires) {
+        return res.status(400).json({ error: 'Undo period has expired' });
+      }
+
+      db.prepare('UPDATE users SET deleted_at = NULL, delete_token = NULL, delete_expires = NULL WHERE id = ?')
+        .run(user.id);
+
+      res.json({ success: true, message: 'Account restored successfully! You can now log in again.' });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 
@@ -1046,6 +1296,37 @@ async function startServer() {
   httpServer.listen(3000, '0.0.0.0', () => {
     console.log('Server running on http://localhost:3000');
     
+    // Cleanup job for deleted accounts (runs every hour)
+    setInterval(() => {
+      try {
+        console.log('[CLEANUP] Checking for expired account deletions...');
+        const expiredUsers = db.prepare('SELECT id FROM users WHERE deleted_at IS NOT NULL AND delete_expires < CURRENT_TIMESTAMP').all();
+        
+        for (const user of expiredUsers as any[]) {
+          console.log(`[CLEANUP] Anonymizing user ${user.id}`);
+          // Soft delete / Anonymize
+          db.prepare(`
+            UPDATE users 
+            SET email = 'deleted_' || id || '@deleted.ecotrade',
+                password = 'DELETED_' || id,
+                name = 'Deleted User',
+                full_name = 'Deleted User',
+                username = 'deleted_user_' || id,
+                bio = NULL,
+                location = NULL,
+                avatar_url = NULL,
+                cover_url = NULL,
+                social_links = NULL,
+                national_id_encrypted = NULL,
+                deleted_at = CURRENT_TIMESTAMP -- Keep this to mark as permanently deleted in this sense
+            WHERE id = ?
+          `).run(user.id);
+        }
+      } catch (error) {
+        console.error('[CLEANUP ERROR]', error);
+      }
+    }, 60 * 60 * 1000);
+
     // Seed sample data if empty
     const usersCount: any = db.prepare('SELECT COUNT(*) as count FROM users').get();
     if (usersCount.count === 0) {

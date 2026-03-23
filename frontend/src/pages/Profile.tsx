@@ -6,7 +6,7 @@ import {
   AtSign, X, Save, Fingerprint, ExternalLink, 
   TrendingUp, ShoppingBag, Heart, MoreHorizontal,
   Twitter, Instagram, Globe, Share2, Camera,
-  ChevronRight, Award, Zap, Shield
+  ChevronRight, Award, Zap, Shield, Download, Trash2, Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -32,6 +32,8 @@ export default function Profile({ user: initialUser }: { user: any }) {
     }
   });
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
   const [nationalId, setNationalId] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
@@ -143,6 +145,71 @@ export default function Profile({ user: initialUser }: { user: any }) {
       }
     } catch (err) {
       setError('Failed to verify identity');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleExportData = async () => {
+    setActionLoading(true);
+    try {
+      const res = await fetch('/api/user/export-data', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ecotrade_data_${user.username || user.id}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setSuccess('Data export started successfully!');
+      } else {
+        const data = await res.json();
+        setError(data.error || 'Failed to export data');
+      }
+    } catch (err) {
+      setError('Error exporting data');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deletePassword) {
+      setError('Please enter your password to confirm deletion');
+      return;
+    }
+
+    setActionLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/user/delete-account', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ password: deletePassword })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setSuccess(data.message);
+        setTimeout(() => {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          navigate('/login');
+          window.location.reload();
+        }, 3000);
+      } else {
+        setError(data.error || 'Failed to schedule deletion');
+      }
+    } catch (err) {
+      setError('Error scheduling deletion');
     } finally {
       setActionLoading(false);
     }
@@ -386,6 +453,40 @@ export default function Profile({ user: initialUser }: { user: any }) {
                     Verify Identity
                   </motion.button>
                 )}
+
+                {/* Account Actions / Danger Zone */}
+                <div className="pt-8 mt-8 border-t border-slate-100 space-y-4">
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Account Management</h3>
+                  
+                  <motion.button 
+                    whileHover={{ x: 5 }}
+                    onClick={handleExportData}
+                    disabled={actionLoading}
+                    className="flex w-full items-center justify-between group rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-xl bg-white p-2 text-slate-400 group-hover:text-blue-500 shadow-sm transition-colors">
+                        <Download size={16} />
+                      </div>
+                      Export My Data
+                    </div>
+                    <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
+                  </motion.button>
+
+                  <motion.button 
+                    whileHover={{ x: 5 }}
+                    onClick={() => setIsDeleting(true)}
+                    className="flex w-full items-center justify-between group rounded-2xl bg-red-50/50 p-4 text-sm font-bold text-red-600 hover:bg-red-50 transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-xl bg-white p-2 text-red-400 group-hover:text-red-600 shadow-sm transition-colors">
+                        <Trash2 size={16} />
+                      </div>
+                      Delete Account
+                    </div>
+                    <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
+                  </motion.button>
+                </div>
               </div>
             </div>
           </motion.div>
@@ -809,6 +910,74 @@ export default function Profile({ user: initialUser }: { user: any }) {
                 
                 <p className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                   Secure Encryption Enabled
+                </p>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {isDeleting && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDeleting(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md rounded-[3.5rem] bg-white p-10 shadow-2xl border border-slate-100"
+            >
+              <div className="mb-8 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="rounded-2xl bg-red-600 p-3 text-white shadow-lg shadow-red-200">
+                    <Trash2 size={24} />
+                  </div>
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">Delete Account</h2>
+                </div>
+                <button onClick={() => setIsDeleting(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <div className="mb-8 space-y-4">
+                <div className="flex items-start gap-3 rounded-3xl bg-red-50 p-6 text-sm font-medium text-red-800 border border-red-100">
+                  <Shield size={18} className="mt-1 shrink-0" />
+                  <p>This action will schedule your account for deletion. You will have 7 days to restore it before your data is permanently anonymized.</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleDeleteAccount} className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Confirm Password</label>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                    <input 
+                      type="password" 
+                      required
+                      value={deletePassword} 
+                      onChange={(e) => setDeletePassword(e.target.value)}
+                      placeholder="Enter your password"
+                      className="h-16 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 font-semibold outline-none transition-all focus:border-red-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+                
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="submit" 
+                  disabled={actionLoading}
+                  className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-red-600 font-black text-white shadow-xl shadow-red-200 hover:bg-red-700 disabled:opacity-50 transition-all"
+                >
+                  {actionLoading ? <Loader2 className="animate-spin" /> : 'Confirm Deletion'}
+                </motion.button>
+                
+                <p className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  Secure Verification Required
                 </p>
               </form>
             </motion.div>

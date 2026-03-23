@@ -28,6 +28,11 @@ db.exec(`
     username_updated_at DATETIME,
     cover_url TEXT,
     social_links TEXT, -- JSON object
+    deleted_at DATETIME,
+    delete_token TEXT,
+    delete_expires DATETIME,
+    google_id TEXT UNIQUE,
+    github_id TEXT UNIQUE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -148,6 +153,11 @@ try { db.exec('ALTER TABLE users ADD COLUMN cover_url TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN social_links TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN is_seller_verified INTEGER DEFAULT 0'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN deleted_at DATETIME'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN delete_token TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN delete_expires DATETIME'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN google_id TEXT UNIQUE'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN github_id TEXT UNIQUE'); } catch (e) {}
 
 try { db.exec("UPDATE users SET is_email_verified = 1"); } catch (e) {}
 
