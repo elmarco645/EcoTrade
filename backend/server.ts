@@ -287,6 +287,10 @@ async function startServer() {
   app.use('/uploads', express.static(uploadsDir));
 
   // --- Auth Routes ---
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', time: new Date().toISOString() });
+  });
+
   app.post('/api/auth/register', async (req, res) => {
     const { email, password, confirmPassword, name, username, captchaToken } = req.body;
     try {
@@ -354,7 +358,16 @@ async function startServer() {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
+      console.log(`[LOGIN DEBUG] User found: ${user.email}, is_email_verified: ${user.is_email_verified}, failed_attempts: ${user.failed_attempts}`);
+
+      // Check if account is already locked
+      if (user.failed_attempts >= 5) {
+        console.log(`[LOGIN FAILED] Account locked: ${identifier}`);
+        return res.status(401).json({ error: 'Account locked due to too many failed attempts. Please contact support or reset your password.' });
+      }
+
       const isMatch = await bcrypt.compare(password, user.password);
+      console.log(`[LOGIN DEBUG] Password match: ${isMatch}`);
       
       if (!isMatch) {
         console.log(`[LOGIN FAILED] Password mismatch for: ${identifier}`);
@@ -364,6 +377,7 @@ async function startServer() {
         
         // Check if account should be locked (e.g., after 5 attempts)
         if (user.failed_attempts + 1 >= 5) {
+          console.log(`[LOGIN FAILED] Account just locked: ${identifier}`);
           return res.status(401).json({ error: 'Account locked due to too many failed attempts. Please contact support or reset your password.' });
         }
         
