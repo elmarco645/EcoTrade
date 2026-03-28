@@ -171,7 +171,24 @@ if (!columns.includes('reset_token_expiry')) {
   try { db.exec('ALTER TABLE users ADD COLUMN reset_token_expiry DATETIME'); } catch (e) { console.error('Error adding reset_token_expiry column:', e); }
 }
 
+if (!columns.includes('phone')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN phone TEXT'); } catch (e) { console.error('Error adding phone column:', e); }
+}
+if (!columns.includes('avatar')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN avatar TEXT'); } catch (e) { console.error('Error adding avatar column:', e); }
+}
+if (!columns.includes('lock_until')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN lock_until DATETIME'); } catch (e) { console.error('Error adding lock_until column:', e); }
+}
+if (!columns.includes('email_change_token')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN email_change_token TEXT'); } catch (e) { console.error('Error adding email_change_token column:', e); }
+}
+if (!columns.includes('new_email')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN new_email TEXT'); } catch (e) { console.error('Error adding new_email column:', e); }
+}
+
 try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)'); } catch (e) {}
+try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone)'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN national_id_encrypted TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN username_updated_at DATETIME'); } catch (e) {}
@@ -182,13 +199,10 @@ try { db.exec('ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0');
 try { db.exec('ALTER TABLE users ADD COLUMN deleted_at DATETIME'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN delete_token TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN delete_expires DATETIME'); } catch (e) {}
-try { db.exec('ALTER TABLE users ADD COLUMN google_id TEXT UNIQUE'); } catch (e) {}
-try { db.exec('ALTER TABLE users ADD COLUMN github_id TEXT UNIQUE'); } catch (e) {}
-try { db.exec('ALTER TABLE users ADD COLUMN phone TEXT UNIQUE'); } catch (e) {}
-try { db.exec('ALTER TABLE users ADD COLUMN avatar TEXT'); } catch (e) {}
-try { db.exec('ALTER TABLE users ADD COLUMN lock_until DATETIME'); } catch (e) {}
-try { db.exec('ALTER TABLE users ADD COLUMN email_change_token TEXT'); } catch (e) {}
-try { db.exec('ALTER TABLE users ADD COLUMN new_email TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN google_id TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN github_id TEXT'); } catch (e) {}
+try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL'); } catch (e) {}
+try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_github_id ON users(github_id) WHERE github_id IS NOT NULL'); } catch (e) {}
 
 try { db.exec("UPDATE users SET is_email_verified = 1"); } catch (e) {}
 
