@@ -1,6 +1,9 @@
 import Database from 'better-sqlite3';
+import path from 'path';
 
-const db = new Database('ecotrade.db');
+const dbPath = path.resolve('ecotrade.db');
+console.log(`[DB] Connecting to database at: ${dbPath}`);
+const db = new Database(dbPath);
 
 // Initialize database schema
 db.exec(`
@@ -21,6 +24,9 @@ db.exec(`
     is_email_verified INTEGER DEFAULT 0,
     is_seller_verified INTEGER DEFAULT 0,
     failed_attempts INTEGER DEFAULT 0,
+    lock_until DATETIME,
+    phone TEXT UNIQUE,
+    avatar TEXT,
     verification_token TEXT,
     reset_token TEXT,
     reset_token_expiry DATETIME,
@@ -33,6 +39,8 @@ db.exec(`
     delete_expires DATETIME,
     google_id TEXT UNIQUE,
     github_id TEXT UNIQUE,
+    email_change_token TEXT,
+    new_email TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -138,6 +146,24 @@ if (!columns.includes('is_email_verified')) {
 if (!columns.includes('verification_token')) {
   try { db.exec('ALTER TABLE users ADD COLUMN verification_token TEXT'); } catch (e) { console.error('Error adding verification_token column:', e); }
 }
+if (!columns.includes('role')) {
+  try { db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'buyer'"); } catch (e) {}
+}
+if (!columns.includes('bio')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN bio TEXT'); } catch (e) {}
+}
+if (!columns.includes('location')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN location TEXT'); } catch (e) {}
+}
+if (!columns.includes('avatar_url')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT'); } catch (e) {}
+}
+if (!columns.includes('wallet_balance')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN wallet_balance REAL DEFAULT 1000.0'); } catch (e) {}
+}
+if (!columns.includes('rating')) {
+  try { db.exec('ALTER TABLE users ADD COLUMN rating REAL DEFAULT 0'); } catch (e) {}
+}
 if (!columns.includes('reset_token')) {
   try { db.exec('ALTER TABLE users ADD COLUMN reset_token TEXT'); } catch (e) { console.error('Error adding reset_token column:', e); }
 }
@@ -158,6 +184,11 @@ try { db.exec('ALTER TABLE users ADD COLUMN delete_token TEXT'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN delete_expires DATETIME'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN google_id TEXT UNIQUE'); } catch (e) {}
 try { db.exec('ALTER TABLE users ADD COLUMN github_id TEXT UNIQUE'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN phone TEXT UNIQUE'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN avatar TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN lock_until DATETIME'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN email_change_token TEXT'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN new_email TEXT'); } catch (e) {}
 
 try { db.exec("UPDATE users SET is_email_verified = 1"); } catch (e) {}
 

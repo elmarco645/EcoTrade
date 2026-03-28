@@ -184,11 +184,20 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
               <div className="relative" ref={menuRef}>
                 <button 
                   onClick={() => setIsMenuOpen(!isMenuOpen)}
-                  className={`flex h-10 w-10 items-center justify-center rounded-full border bg-white transition-all ${
+                  className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border bg-white transition-all ${
                     isMenuOpen ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200 hover:border-blue-500'
                   }`}
                 >
-                  <User className="h-5 w-5 text-slate-600" />
+                  {user.avatar ? (
+                    <img 
+                      src={user.avatar} 
+                      alt={user.username} 
+                      className="h-full w-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <User className="h-5 w-5 text-slate-600" />
+                  )}
                 </button>
                 {isMenuOpen && (
                   <div className="absolute right-0 top-full mt-2 w-48 rounded-xl border border-slate-200 bg-white p-2 shadow-xl animate-in fade-in zoom-in duration-200">

@@ -66,6 +66,8 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
       if (res.ok) {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
+        localStorage.setItem('username', data.user.username);
+        localStorage.setItem('avatar', data.user.avatar);
         setUser(data.user);
         navigate('/');
       } else {
@@ -122,7 +124,7 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
                 required
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                placeholder="Email or Username"
+                placeholder="Email, Username or Phone"
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
               />
             </div>

@@ -116,6 +116,33 @@ const sendDeleteUndoEmail = async (email: string, token: string, origin: string)
   }
 };
 
+const sendEmailChangeVerificationEmail = async (email: string, token: string, origin: string) => {
+  if (!EMAIL_USER || !EMAIL_PASS) {
+    console.warn('Email credentials missing. Email change simulation only.');
+    console.log(`[EMAIL SIMULATION] Email change link for ${email}: ${origin}/api/user/confirm-email-change?token=${token}`);
+    return;
+  }
+
+  const link = `${origin}/api/user/confirm-email-change?token=${token}`;
+
+  try {
+    await transporter.sendMail({
+      from: `"EcoTrade" <${EMAIL_USER}>`,
+      to: email,
+      subject: 'Confirm your EcoTrade email change',
+      html: emailTemplate(
+        "Confirm Email Change",
+        "You requested to change your email address on EcoTrade. Click the button below to confirm this change. If you didn't request this, please ignore this email.",
+        "Confirm Email Change",
+        link
+      )
+    });
+    console.log(`Email change verification sent to ${email}`);
+  } catch (error) {
+    console.error('Error sending email change verification:', error);
+  }
+};
+
 const sendForgotPasswordEmail = async (email: string, token: string, origin: string) => {
   if (!EMAIL_USER || !EMAIL_PASS) {
     console.warn('Email credentials missing. Forgot password email simulation only.');
@@ -287,8 +314,12 @@ async function startServer() {
   app.use('/uploads', express.static(uploadsDir));
 
   // --- Auth Routes ---
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', time: new Date().toISOString() });
+  });
+
   app.post('/api/auth/register', async (req, res) => {
-    const { email, password, confirmPassword, name, username, captchaToken } = req.body;
+    const { email, password, confirmPassword, name, username, phone, avatar, captchaToken } = req.body;
     try {
       // Verify CAPTCHA
       if (RECAPTCHA_SECRET && !captchaToken) {
@@ -314,15 +345,16 @@ async function startServer() {
       const hashedPassword = await bcrypt.hash(password, 10);
       const verificationToken = crypto.randomBytes(32).toString('hex');
       
-      const stmt = db.prepare('INSERT INTO users (email, password, name, full_name, username, verification_token, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, 0)');
-      const result = stmt.run(email, hashedPassword, name, name, username || null, verificationToken);
+      const stmt = db.prepare('INSERT INTO users (email, password, name, full_name, username, phone, avatar, verification_token, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)');
+      const result = stmt.run(email, hashedPassword, name, name, username || null, phone || null, avatar || null, verificationToken);
       
       // Send real verification email
-      await sendVerificationEmail(email, verificationToken, req.headers.origin || 'http://localhost:3000');
+      const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
+      await sendVerificationEmail(email, verificationToken, origin);
       
       res.json({ 
         message: 'Signup successful! Please check your email to verify your account.',
-        user: { id: result.lastInsertRowid, email, name, username, role: 'buyer', is_email_verified: 0 } 
+        user: { id: result.lastInsertRowid, email, name, username, phone, avatar, role: 'buyer', is_email_verified: 0 } 
       });
     } catch (error: any) {
       if (error.message.includes('UNIQUE constraint failed: users.username')) {
@@ -332,8 +364,15 @@ async function startServer() {
     }
   });
 
+  function detectInputType(input: string) {
+    if (input.includes("@")) return "email";
+    if (/^\+?\d{10,15}$/.test(input)) return "phone";
+    return "username";
+  }
+
   app.post('/api/auth/login', async (req, res) => {
-    const { identifier, password, captchaToken } = req.body;
+    let { identifier, password, captchaToken } = req.body;
+    identifier = identifier?.trim();
     console.log(`[LOGIN ATTEMPT] Identifier: ${identifier}`);
     
     try {
@@ -346,12 +385,28 @@ async function startServer() {
         return res.status(400).json({ error: 'Invalid CAPTCHA' });
       }
 
-      // Find user by email OR username
-      const user: any = db.prepare('SELECT * FROM users WHERE email = ? OR username = ?').get(identifier, identifier);
+      const type = detectInputType(identifier);
+      console.log(`[LOGIN DEBUG] Detected input type: ${type} for "${identifier}"`);
+      
+      let user: any;
+      if (type === "email") {
+        user = db.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?)').get(identifier);
+      } else if (type === "phone") {
+        user = db.prepare('SELECT * FROM users WHERE phone = ?').get(identifier);
+      } else {
+        user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(identifier);
+      }
       
       if (!user) {
-        console.log(`[LOGIN FAILED] User not found: ${identifier}`);
+        console.log(`[LOGIN FAILED] User not found: "${identifier}"`);
         return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      // Check if account is locked
+      if (user.lock_until && Date.now() < user.lock_until) {
+        const remainingMinutes = Math.ceil((user.lock_until - Date.now()) / (60 * 1000));
+        console.log(`[LOGIN FAILED] Account locked: ${identifier}, remaining: ${remainingMinutes}m`);
+        return res.status(403).json({ error: `Account locked due to too many failed attempts. Please try again in ${remainingMinutes} minutes.` });
       }
 
       const isMatch = await bcrypt.compare(password, user.password);
@@ -359,13 +414,15 @@ async function startServer() {
       if (!isMatch) {
         console.log(`[LOGIN FAILED] Password mismatch for: ${identifier}`);
         
-        // Increment failed attempts
-        db.prepare('UPDATE users SET failed_attempts = failed_attempts + 1 WHERE id = ?').run(user.id);
-        
-        // Check if account should be locked (e.g., after 5 attempts)
-        if (user.failed_attempts + 1 >= 5) {
-          return res.status(401).json({ error: 'Account locked due to too many failed attempts. Please contact support or reset your password.' });
+        const attempts = (user.failed_attempts || 0) + 1;
+        let lockUntil = null;
+
+        if (attempts >= 5) {
+          lockUntil = Date.now() + (15 * 60 * 1000); // 15 mins
+          console.log(`[LOGIN FAILED] Locking account: ${identifier} until ${new Date(lockUntil).toISOString()}`);
         }
+        
+        db.prepare('UPDATE users SET failed_attempts = ?, lock_until = ? WHERE id = ?').run(attempts, lockUntil, user.id);
         
         // Artificial delay to prevent brute-force
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -374,7 +431,7 @@ async function startServer() {
       }
 
       // Reset failed attempts on success
-      db.prepare('UPDATE users SET failed_attempts = 0 WHERE id = ?').run(user.id);
+      db.prepare('UPDATE users SET failed_attempts = 0, lock_until = NULL WHERE id = ?').run(user.id);
 
       if (user.deleted_at) {
         return res.status(403).json({ 
@@ -399,7 +456,20 @@ async function startServer() {
         JWT_SECRET,
         { expiresIn: '7d' }
       );
-      res.json({ token, user: { id: user.id, email: user.email, name: user.name, username: user.username, role: user.role, is_email_verified: user.is_email_verified, is_seller_verified: user.is_seller_verified } });
+      
+      res.json({ 
+        token, 
+        user: { 
+          id: user.id, 
+          email: user.email, 
+          name: user.name, 
+          username: user.username, 
+          role: user.role, 
+          avatar: user.avatar || user.avatar_url || "/default-avatar.png",
+          is_email_verified: user.is_email_verified, 
+          is_seller_verified: user.is_seller_verified 
+        } 
+      });
     } catch (error: any) {
       console.error('[LOGIN ERROR]', error);
       res.status(500).json({ error: error.message || 'Internal server error' });
@@ -429,7 +499,8 @@ async function startServer() {
       const verificationToken = crypto.randomBytes(32).toString('hex');
       db.prepare('UPDATE users SET verification_token = ? WHERE id = ?').run(verificationToken, user.id);
 
-      await sendVerificationEmail(email, verificationToken, req.headers.origin || 'http://localhost:3000');
+      const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
+      await sendVerificationEmail(email, verificationToken, origin);
       res.json({ success: true, message: 'Verification email resent successfully!' });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -450,7 +521,8 @@ async function startServer() {
         db.prepare('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?')
           .run(resetToken, resetTokenExpiry, user.id);
           
-        await sendForgotPasswordEmail(email, resetToken, req.headers.origin || 'http://localhost:3000');
+      const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
+      await sendForgotPasswordEmail(email, resetToken, origin);
       }
       
       // Always return success to prevent email enumeration
@@ -479,7 +551,7 @@ async function startServer() {
   // --- OAuth Routes ---
   app.get('/api/auth/google/url', (req, res) => {
     if (!GOOGLE_CLIENT_ID) return res.status(500).json({ error: 'Google OAuth not configured' });
-    const origin = req.headers.origin || process.env.APP_URL || 'http://localhost:3000';
+    const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
     const redirectUri = `${origin}/auth/callback`;
     const params = new URLSearchParams({
       client_id: GOOGLE_CLIENT_ID,
@@ -495,7 +567,7 @@ async function startServer() {
 
   app.get('/api/auth/github/url', (req, res) => {
     if (!GITHUB_CLIENT_ID) return res.status(500).json({ error: 'GitHub OAuth not configured' });
-    const origin = req.headers.origin || process.env.APP_URL || 'http://localhost:3000';
+    const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
     const redirectUri = `${origin}/auth/callback`;
     const params = new URLSearchParams({
       client_id: GITHUB_CLIENT_ID,
@@ -627,7 +699,7 @@ async function startServer() {
   });
 
   app.patch('/api/user/profile', authenticateToken, (req: any, res) => {
-    const { name, username, bio, location, avatar_url, cover_url, social_links } = req.body;
+    const { name, username, bio, location, avatar_url, avatar, phone, cover_url, social_links } = req.body;
     try {
       const currentUser: any = db.prepare('SELECT username, username_updated_at FROM users WHERE id = ?').get(req.user.id);
       
@@ -656,18 +728,99 @@ async function startServer() {
             bio = COALESCE(?, bio),
             location = COALESCE(?, location),
             avatar_url = COALESCE(?, avatar_url),
+            avatar = COALESCE(?, avatar),
+            phone = COALESCE(?, phone),
             cover_url = COALESCE(?, cover_url),
             social_links = COALESCE(?, social_links)
         WHERE id = ?
       `);
       
-      stmt.run(name, updateUsername ? 1 : 0, username, updateUsername ? 1 : 0, bio, location, avatar_url, cover_url, typeof social_links === 'object' ? JSON.stringify(social_links) : social_links, req.user.id);
+      stmt.run(name, updateUsername ? 1 : 0, username, updateUsername ? 1 : 0, bio, location, avatar_url, avatar, phone, cover_url, typeof social_links === 'object' ? JSON.stringify(social_links) : social_links, req.user.id);
       res.json({ success: true });
     } catch (error: any) {
       if (error.message.includes('UNIQUE constraint failed: users.username')) {
         return res.status(400).json({ error: 'Username already taken' });
       }
+      if (error.message.includes('UNIQUE constraint failed: users.phone')) {
+        return res.status(400).json({ error: 'Phone number already in use' });
+      }
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/user/change-password', authenticateToken, async (req: any, res) => {
+    const { oldPassword, newPassword } = req.body;
+    try {
+      const user: any = db.prepare('SELECT password FROM users WHERE id = ?').get(req.user.id);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+
+      const isMatch = await bcrypt.compare(oldPassword, user.password);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Incorrect current password' });
+      }
+
+      if (newPassword.length < 6) {
+        return res.status(400).json({ error: 'New password must be at least 6 characters' });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashedPassword, req.user.id);
+      res.json({ success: true, message: 'Password updated successfully' });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/user/request-email-change', authenticateToken, async (req: any, res) => {
+    const { newEmail } = req.body;
+    try {
+      if (!newEmail || !newEmail.includes('@')) {
+        return res.status(400).json({ error: 'Invalid email address' });
+      }
+
+      const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(newEmail);
+      if (existingUser) {
+        return res.status(400).json({ error: 'Email already in use' });
+      }
+
+      const token = crypto.randomBytes(32).toString('hex');
+      console.log(`[DEBUG] Generated email change token: ${token} for user ${req.user.id}`);
+      db.prepare('UPDATE users SET email_change_token = ?, new_email = ? WHERE id = ?').run(token, newEmail, req.user.id);
+
+      const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
+      await sendEmailChangeVerificationEmail(newEmail, token, origin);
+      res.json({ success: true, message: 'Verification email sent to new email address' });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/user/confirm-email-change', async (req, res) => {
+    const { token } = req.query;
+    console.log(`[DEBUG] Received email change confirmation request with token: ${token}`);
+    try {
+      if (!token) return res.status(400).json({ error: 'Token is required' });
+
+      const user: any = db.prepare('SELECT id, new_email FROM users WHERE email_change_token = ?').get(token);
+      if (!user) {
+        console.log(`[DEBUG] No user found for token: ${token}`);
+        return res.status(400).json({ error: 'Invalid or expired token' });
+      }
+
+      console.log(`[DEBUG] Found user ${user.id} for token. Updating email to ${user.new_email}`);
+      db.prepare('UPDATE users SET email = ?, new_email = NULL, email_change_token = NULL WHERE id = ?').run(user.new_email, user.id);
+      res.send(`
+        <html>
+          <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
+            <h1 style="color: #2ecc71;">✅ Email updated successfully!</h1>
+            <p>You can now log in with your new email address.</p>
+            <a href="/" style="display: inline-block; margin-top: 20px; padding: 10px 20px; background: #2ecc71; color: white; text-decoration: none; border-radius: 5px;">Go to EcoTrade</a>
+          </body>
+        </html>
+      `);
+    } catch (error: any) {
+      console.error(`[ERROR] Email change confirmation failed: ${error.message}`);
+      res.status(500).json({ error: error.message });
     }
   });
 
@@ -759,7 +912,8 @@ async function startServer() {
       db.prepare('UPDATE users SET deleted_at = CURRENT_TIMESTAMP, delete_token = ?, delete_expires = ? WHERE id = ?')
         .run(deleteToken, expires.toISOString(), req.user.id);
 
-      await sendDeleteUndoEmail(user.email, deleteToken, req.headers.origin || 'http://localhost:3000');
+      const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
+      await sendDeleteUndoEmail(user.email, deleteToken, origin);
 
       res.json({ success: true, message: 'Account scheduled for deletion. You have 7 days to undo this.' });
     } catch (error: any) {
@@ -791,14 +945,21 @@ async function startServer() {
 
   // --- Listing Routes ---
   app.get('/api/listings', (req, res) => {
-    const listings = db.prepare(`
-      SELECT l.*, u.name as seller_name, u.avatar_url as seller_avatar, u.is_seller_verified 
-      FROM listings l 
-      JOIN users u ON l.seller_id = u.id 
-      WHERE l.status != 'sold'
-      ORDER BY l.created_at DESC
-    `).all();
-    res.json(listings);
+    try {
+      console.log('[API] Fetching all listings...');
+      const listings = db.prepare(`
+        SELECT l.*, u.name as seller_name, u.avatar_url as seller_avatar, u.is_seller_verified 
+        FROM listings l 
+        JOIN users u ON l.seller_id = u.id 
+        WHERE l.status != 'sold'
+        ORDER BY l.created_at DESC
+      `).all();
+      console.log(`[API] Found ${listings.length} listings`);
+      res.json(listings);
+    } catch (error) {
+      console.error('[API ERROR] Failed to fetch listings:', error);
+      res.status(500).json({ error: 'Failed to fetch listings' });
+    }
   });
 
   app.get('/api/listings/:id', (req, res) => {
@@ -1334,8 +1495,9 @@ async function startServer() {
       const hashedPassword = bcrypt.hashSync('password123', 10);
       
       // Create users
-      const user1 = db.prepare('INSERT INTO users (email, password, name, wallet_balance, rating, is_email_verified) VALUES (?, ?, ?, ?, ?, 1)').run('alice@example.com', hashedPassword, 'Alice Green', 500, 4.9);
-      const user2 = db.prepare('INSERT INTO users (email, password, name, wallet_balance, rating, is_email_verified) VALUES (?, ?, ?, ?, ?, 1)').run('bob@example.com', hashedPassword, 'Bob Smith', 1000, 4.5);
+      const user1 = db.prepare('INSERT INTO users (email, password, name, username, wallet_balance, rating, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, 1)').run('alice@example.com', hashedPassword, 'Alice Green', 'alice', 500, 4.9);
+      const user2 = db.prepare('INSERT INTO users (email, password, name, username, wallet_balance, rating, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, 1)').run('bob@example.com', hashedPassword, 'Bob Smith', 'bob', 1000, 4.5);
+      const user3 = db.prepare('INSERT INTO users (email, password, name, username, wallet_balance, rating, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, 1)').run('nefaryus@example.com', hashedPassword, 'Nefaryus', 'Nefaryus', 1500, 5.0);
       
       // Create listings
       const listings = [
@@ -1343,12 +1505,12 @@ async function startServer() {
         { seller_id: user1.lastInsertRowid, title: 'Mechanical Keyboard', description: 'RGB backlit mechanical keyboard with blue switches.', category: 'Electronics', condition: 'Like New', price: 45, is_negotiable: 0, location: 'Mombasa', images: ['https://picsum.photos/seed/kb/800/800'] },
         { seller_id: user2.lastInsertRowid, title: 'Retro Camera', description: 'Classic film camera in working condition.', category: 'Electronics', condition: 'Used - Fair', price: 120, is_negotiable: 1, location: 'Kisumu', images: ['https://picsum.photos/seed/camera/800/800'] },
         { seller_id: user2.lastInsertRowid, title: 'iPhone 13 Pro', description: '128GB, Sierra Blue, excellent condition.', category: 'Phones & Tablets', condition: 'Like New', price: 750, is_negotiable: 1, location: 'Nairobi', images: ['https://picsum.photos/seed/iphone/800/800'] },
+        { seller_id: user3.lastInsertRowid, title: 'High-end Gaming PC', description: 'RTX 4090, i9-13900K, 64GB RAM.', category: 'Computers & Laptops', condition: 'New', price: 3500, is_negotiable: 0, location: 'Nairobi', images: ['https://picsum.photos/seed/pc/800/800'] },
+        { seller_id: user3.lastInsertRowid, title: 'Sony WH-1000XM5', description: 'Industry-leading noise canceling headphones.', category: 'Electronics', condition: 'New', price: 350, is_negotiable: 0, location: 'Nairobi', images: ['https://picsum.photos/seed/sony/800/800'] },
         { seller_id: user1.lastInsertRowid, title: 'MacBook Air M1', description: '8GB RAM, 256GB SSD, Space Gray.', category: 'Computers & Laptops', condition: 'New', price: 900, is_negotiable: 0, location: 'Nakuru', images: ['https://picsum.photos/seed/macbook/800/800'] },
         { seller_id: user2.lastInsertRowid, title: 'PS5 Console', description: 'Disc version with two controllers.', category: 'Gaming', condition: 'New', price: 550, is_negotiable: 0, location: 'Eldoret', images: ['https://picsum.photos/seed/ps5/800/800'] },
         { seller_id: user1.lastInsertRowid, title: 'Nike Air Max', description: 'Size 10, brand new in box.', category: 'Fashion', condition: 'New', price: 110, is_negotiable: 1, location: 'Nairobi', images: ['https://picsum.photos/seed/nike/800/800'] },
         { seller_id: user2.lastInsertRowid, title: 'Coffee Maker', description: 'Automatic espresso machine.', category: 'Appliances', condition: 'Used - Good', price: 150, is_negotiable: 1, location: 'Mombasa', images: ['https://picsum.photos/seed/coffee/800/800'] },
-        { seller_id: user1.lastInsertRowid, title: 'Mountain Bike', description: '21-speed mountain bike, great for trails.', category: 'Sports', condition: 'Used - Good', price: 300, is_negotiable: 1, location: 'Kisumu', images: ['https://picsum.photos/seed/bike/800/800'] },
-        { seller_id: user2.lastInsertRowid, title: 'Dining Table', description: 'Solid oak dining table with 4 chairs.', category: 'Home & Furniture', condition: 'Used - Fair', price: 400, is_negotiable: 1, location: 'Nakuru', images: ['https://picsum.photos/seed/table/800/800'] },
       ];
 
       const insertListing = db.prepare(`

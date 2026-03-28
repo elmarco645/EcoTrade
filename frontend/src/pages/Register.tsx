@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, User, AtSign, Loader2, Eye, EyeOff, Check, X } from 'lucide-react';
+import { Mail, Lock, User, AtSign, Loader2, Eye, EyeOff, Check, X, Phone, Image } from 'lucide-react';
 import ReCAPTCHA from 'react-google-recaptcha';
 
 export default function Register({ setUser }: { setUser: (user: any) => void }) {
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [avatar, setAvatar] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -40,7 +42,7 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, username, email, password, confirmPassword, captchaToken }),
+        body: JSON.stringify({ name, username, email, phone, avatar, password, confirmPassword, captchaToken }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -127,6 +129,26 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Email address"
+                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+              />
+            </div>
+            <div className="relative">
+              <Phone className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="Phone Number (optional)"
+                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+              />
+            </div>
+            <div className="relative">
+              <Image className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+              <input
+                type="url"
+                value={avatar}
+                onChange={(e) => setAvatar(e.target.value)}
+                placeholder="Avatar URL (optional)"
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
               />
             </div>

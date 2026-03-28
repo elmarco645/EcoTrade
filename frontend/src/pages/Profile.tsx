@@ -6,7 +6,7 @@ import {
   AtSign, X, Save, Fingerprint, ExternalLink, 
   TrendingUp, ShoppingBag, Heart, MoreHorizontal,
   Twitter, Instagram, Globe, Share2, Camera,
-  ChevronRight, Award, Zap, Shield, Download, Trash2, Lock
+  ChevronRight, Award, Zap, Shield, Download, Trash2, Lock, Mail, Key
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -25,6 +25,8 @@ export default function Profile({ user: initialUser }: { user: any }) {
     location: '',
     avatar_url: '',
     cover_url: '',
+    phone: '',
+    avatar: '',
     social_links: {
       twitter: '',
       instagram: '',
@@ -33,6 +35,10 @@ export default function Profile({ user: initialUser }: { user: any }) {
   });
   const [isVerifying, setIsVerifying] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isChangingEmail, setIsChangingEmail] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
+  const [emailForm, setEmailForm] = useState({ newEmail: '' });
   const [deletePassword, setDeletePassword] = useState('');
   const [nationalId, setNationalId] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
@@ -74,6 +80,8 @@ export default function Profile({ user: initialUser }: { user: any }) {
           location: profileData.location || '',
           avatar_url: profileData.avatar_url || '',
           cover_url: profileData.cover_url || '',
+          phone: profileData.phone || '',
+          avatar: profileData.avatar || '',
           social_links: socialLinks
         });
       }
@@ -210,6 +218,71 @@ export default function Profile({ user: initialUser }: { user: any }) {
       }
     } catch (err) {
       setError('Error scheduling deletion');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    setActionLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch('/api/user/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          oldPassword: passwordForm.oldPassword,
+          newPassword: passwordForm.newPassword
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccess('Password changed successfully');
+        setIsChangingPassword(false);
+        setPasswordForm({ oldPassword: '', newPassword: '', confirmPassword: '' });
+      } else {
+        setError(data.error || 'Failed to change password');
+      }
+    } catch (err) {
+      setError('Error changing password');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRequestEmailChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setActionLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch('/api/user/request-email-change', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ newEmail: emailForm.newEmail })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccess('Verification email sent to ' + emailForm.newEmail);
+        setIsChangingEmail(false);
+        setEmailForm({ newEmail: '' });
+      } else {
+        setError(data.error || 'Failed to request email change');
+      }
+    } catch (err) {
+      setError('Error requesting email change');
     } finally {
       setActionLoading(false);
     }
@@ -456,7 +529,37 @@ export default function Profile({ user: initialUser }: { user: any }) {
 
                 {/* Account Actions / Danger Zone */}
                 <div className="pt-8 mt-8 border-t border-slate-100 space-y-4">
-                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Account Management</h3>
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Security</h3>
+                  
+                  <motion.button 
+                    whileHover={{ x: 5 }}
+                    onClick={() => setIsChangingPassword(true)}
+                    className="flex w-full items-center justify-between group rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-xl bg-white p-2 text-slate-400 group-hover:text-blue-500 shadow-sm transition-colors">
+                        <Lock size={16} />
+                      </div>
+                      Change Password
+                    </div>
+                    <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
+                  </motion.button>
+
+                  <motion.button 
+                    whileHover={{ x: 5 }}
+                    onClick={() => setIsChangingEmail(true)}
+                    className="flex w-full items-center justify-between group rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600 hover:bg-emerald-50 hover:text-emerald-600 transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-xl bg-white p-2 text-slate-400 group-hover:text-emerald-500 shadow-sm transition-colors">
+                        <Mail size={16} />
+                      </div>
+                      Change Email
+                    </div>
+                    <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
+                  </motion.button>
+
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 pt-4">Account Management</h3>
                   
                   <motion.button 
                     whileHover={{ x: 5 }}
@@ -795,6 +898,16 @@ export default function Profile({ user: initialUser }: { user: any }) {
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                       />
                     </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Phone Number</label>
+                      <input 
+                        type="text" 
+                        value={editForm.phone} 
+                        onChange={(e) => setEditForm({...editForm, phone: e.target.value})}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                        placeholder="+254..."
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -979,6 +1092,157 @@ export default function Profile({ user: initialUser }: { user: any }) {
                 <p className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                   Secure Verification Required
                 </p>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {isChangingPassword && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsChangingPassword(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md rounded-[3.5rem] bg-white p-10 shadow-2xl border border-slate-100"
+            >
+              <div className="mb-8 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="rounded-2xl bg-blue-600 p-3 text-white shadow-lg shadow-blue-200">
+                    <Lock size={24} />
+                  </div>
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Password</h2>
+                </div>
+                <button onClick={() => setIsChangingPassword(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleChangePassword} className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Current Password</label>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                    <input 
+                      type="password" 
+                      required
+                      value={passwordForm.oldPassword} 
+                      onChange={(e) => setPasswordForm({...passwordForm, oldPassword: e.target.value})}
+                      placeholder="Enter current password"
+                      className="h-16 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 font-semibold outline-none transition-all focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">New Password</label>
+                  <div className="relative">
+                    <Key className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                    <input 
+                      type="password" 
+                      required
+                      value={passwordForm.newPassword} 
+                      onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})}
+                      placeholder="Enter new password"
+                      className="h-16 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 font-semibold outline-none transition-all focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Confirm New Password</label>
+                  <div className="relative">
+                    <ShieldCheck className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                    <input 
+                      type="password" 
+                      required
+                      value={passwordForm.confirmPassword} 
+                      onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
+                      placeholder="Confirm new password"
+                      className="h-16 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 font-semibold outline-none transition-all focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+                
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="submit" 
+                  disabled={actionLoading}
+                  className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 font-black text-white shadow-xl shadow-blue-200 hover:bg-blue-700 disabled:opacity-50 transition-all"
+                >
+                  {actionLoading ? <Loader2 className="animate-spin" /> : 'Update Password'}
+                </motion.button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {isChangingEmail && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsChangingEmail(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md rounded-[3.5rem] bg-white p-10 shadow-2xl border border-slate-100"
+            >
+              <div className="mb-8 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="rounded-2xl bg-emerald-600 p-3 text-white shadow-lg shadow-emerald-200">
+                    <Mail size={24} />
+                  </div>
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Email</h2>
+                </div>
+                <button onClick={() => setIsChangingEmail(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="mb-8 space-y-4">
+                <div className="flex items-start gap-3 rounded-3xl bg-emerald-50 p-6 text-sm font-medium text-emerald-800 border border-emerald-100">
+                  <ShieldCheck size={18} className="mt-1 shrink-0" />
+                  <p>We'll send a verification link to your new email address. Your email will only be updated once you confirm it.</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleRequestEmailChange} className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">New Email Address</label>
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                    <input 
+                      type="email" 
+                      required
+                      value={emailForm.newEmail} 
+                      onChange={(e) => setEmailForm({...emailForm, newEmail: e.target.value})}
+                      placeholder="Enter new email"
+                      className="h-16 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 font-semibold outline-none transition-all focus:border-emerald-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+                
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="submit" 
+                  disabled={actionLoading}
+                  className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 font-black text-white shadow-xl shadow-emerald-200 hover:bg-emerald-700 disabled:opacity-50 transition-all"
+                >
+                  {actionLoading ? <Loader2 className="animate-spin" /> : 'Send Verification Link'}
+                </motion.button>
               </form>
             </motion.div>
           </div>
