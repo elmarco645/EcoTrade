@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
@@ -200,6 +201,7 @@ async function startServer() {
   });
 
   app.use(express.json());
+  app.use(cors());
 
   // --- Rate Limiting Configuration ---
 
@@ -345,6 +347,16 @@ async function startServer() {
       const hashedPassword = await bcrypt.hash(password, 10);
       const verificationToken = crypto.randomBytes(32).toString('hex');
       
+      // Check if email already exists to provide a better error message
+      const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+      if (existingUser) {
+        return res.status(400).json({ 
+          error: 'Email already registered', 
+          action: 'LOGIN_INSTEAD',
+          email: email 
+        });
+      }
+
       const stmt = db.prepare('INSERT INTO users (email, password, name, full_name, username, phone, avatar, verification_token, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)');
       const result = stmt.run(email, hashedPassword, name, name, username || null, phone || null, avatar || null, verificationToken);
       
@@ -359,6 +371,13 @@ async function startServer() {
     } catch (error: any) {
       if (error.message.includes('UNIQUE constraint failed: users.username')) {
         return res.status(400).json({ error: 'Username already taken' });
+      }
+      if (error.message.includes('UNIQUE constraint failed: users.email')) {
+        return res.status(400).json({ 
+          error: 'Email already registered', 
+          action: 'LOGIN_INSTEAD',
+          email: email 
+        });
       }
       res.status(400).json({ error: error.message });
     }
@@ -409,7 +428,31 @@ async function startServer() {
         return res.status(403).json({ error: `Account locked due to too many failed attempts. Please try again in ${remainingMinutes} minutes.` });
       }
 
-      const isMatch = await bcrypt.compare(password, user.password);
+      let isMatch = false;
+      
+      // Hybrid password check: support both bcrypt and plain-text (for old accounts)
+      if (user.password && user.password.startsWith('$2')) {
+        try {
+          isMatch = await bcrypt.compare(password, user.password);
+        } catch (err) {
+          console.error(`[LOGIN ERROR] Bcrypt comparison failed for ${identifier}:`, err);
+          isMatch = false;
+        }
+      } else {
+        // Plain text fallback
+        isMatch = password === user.password;
+        
+        // Upgrade to hashed password on successful login
+        if (isMatch) {
+          try {
+            const hashed = await bcrypt.hash(password, 10);
+            db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashed, user.id);
+            console.log(`[LOGIN] Upgraded password to bcrypt for user: ${identifier}`);
+          } catch (upgradeErr) {
+            console.error(`[LOGIN ERROR] Failed to upgrade password for ${identifier}:`, upgradeErr);
+          }
+        }
+      }
       
       if (!isMatch) {
         console.log(`[LOGIN FAILED] Password mismatch for: ${identifier}`);
@@ -934,7 +977,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Undo period has expired' });
       }
 
-      db.prepare('UPDATE users SET deleted_at = NULL, delete_token = NULL, delete_expires = NULL WHERE id = ?')
+      db.prepare('UPDATE users SET deleted_at = NULL, delete_token = NULL, delete_expires = NULL, failed_attempts = 0, lock_until = NULL WHERE id = ?')
         .run(user.id);
 
       res.json({ success: true, message: 'Account restored successfully! You can now log in again.' });

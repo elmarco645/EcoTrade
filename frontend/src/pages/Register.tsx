@@ -16,6 +16,7 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
+  const [showLoginInstead, setShowLoginInstead] = useState(false);
   const navigate = useNavigate();
 
   const siteKey = (import.meta as any).env.VITE_RECAPTCHA_SITE_KEY;
@@ -37,6 +38,7 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
     setLoading(true);
     setError('');
     setSuccess('');
+    setShowLoginInstead(false);
 
     try {
       const res = await fetch('/api/auth/register', {
@@ -56,6 +58,9 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
         setCaptchaToken(null);
       } else {
         setError(data.message || data.error);
+        if (data.action === 'LOGIN_INSTEAD') {
+          setShowLoginInstead(true);
+        }
       }
     } catch (err) {
       setError('Something went wrong. Please try again.');
@@ -90,7 +95,43 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           {error && (
             <div className="rounded-xl bg-red-50 p-4 text-sm font-medium text-red-600">
-              {error}
+              <p>{error}</p>
+              {showLoginInstead && (
+                <div className="mt-4 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/login?email=${encodeURIComponent(email)}`)}
+                    className="w-full rounded-lg bg-red-100 py-2 text-center text-xs font-bold text-red-700 transition-all hover:bg-red-200"
+                  >
+                    Login Instead
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch('/api/auth/forgot-password', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ email }),
+                        });
+                        const data = await res.json();
+                        if (res.ok) {
+                          setSuccess('Password reset email sent! Please check your inbox.');
+                          setError('');
+                          setShowLoginInstead(false);
+                        } else {
+                          setError(data.error);
+                        }
+                      } catch (err) {
+                        setError('Failed to send reset email.');
+                      }
+                    }}
+                    className="w-full rounded-lg bg-white border border-red-200 py-2 text-center text-xs font-bold text-red-600 transition-all hover:bg-red-50"
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {success && (
