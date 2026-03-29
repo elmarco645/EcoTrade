@@ -4,7 +4,10 @@ import { User as UserIcon, Lock, Loader2, ShieldCheck, Eye, EyeOff } from 'lucid
 import ReCAPTCHA from 'react-google-recaptcha';
 
 export default function Login({ setUser }: { setUser: (user: any) => void }) {
-  const [identifier, setIdentifier] = useState('');
+  const [identifier, setIdentifier] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('email') || '';
+  });
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
