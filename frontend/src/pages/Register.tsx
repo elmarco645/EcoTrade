@@ -50,13 +50,10 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
 
-      // 2. Send verification email
-      await sendEmailVerification(firebaseUser);
-
-      // 3. Get ID token to send to our backend
+      // 2. Get ID token to send to our backend
       const token = await firebaseUser.getIdToken();
 
-      // 4. Create user in our local database
+      // 3. Create user in our local database
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 
@@ -65,9 +62,34 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
         },
         body: JSON.stringify({ name, username, email, phone, avatar, captchaToken }),
       });
-      const data = await res.json();
+      
+      let data;
+      const contentType = res.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        console.error('Non-JSON response:', text);
+        throw new Error('Server returned an invalid response. Please try again later.');
+      }
+
       if (res.ok) {
-        setSuccess('Signup successful! Please check your email to verify your account.');
+        // 4. Send verification email AFTER local registration succeeds
+        try {
+          const actionCodeSettings = {
+            url: `${window.location.origin}/verify-email`,
+            handleCodeInApp: true,
+          };
+          await sendEmailVerification(firebaseUser, actionCodeSettings);
+          setSuccess('Signup successful! A verification email has been sent to ' + email + '. Please check your inbox.');
+        } catch (emailErr: any) {
+          console.error('Email verification error:', emailErr);
+          if (emailErr.code === 'auth/unauthorized-continue-uri') {
+            setSuccess('Signup successful! However, we couldn\'t send a verification email because this domain is not whitelisted in Firebase. Please add ' + window.location.origin + ' to Authorized Domains in Firebase Console.');
+          } else {
+            setSuccess('Signup successful! However, we couldn\'t send a verification email right now. Please try to login to resend it.');
+          }
+        }
         // Clear form
         setName('');
         setUsername('');

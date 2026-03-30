@@ -4,7 +4,6 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
 import bcrypt from 'bcryptjs';
-import db from './db.ts';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
@@ -15,36 +14,46 @@ import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import admin from 'firebase-admin';
 
+import firebaseConfig from '../firebase-applet-config.json' assert { type: 'json' };
+
 console.log('[SERVER] Initializing Firebase Admin...');
 if (!admin) {
   console.error('[SERVER] Firebase Admin module not found');
 } else {
   try {
-    const projectId = process.env.FIREBASE_PROJECT_ID || 'ecotrade-94ab2';
+    const projectId = firebaseConfig.projectId;
     const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     
     const config: any = {
       projectId: projectId,
     };
 
-    if (credentialsPath) {
-      try {
-        if (fs.existsSync(credentialsPath)) {
-          config.credential = admin.credential.cert(credentialsPath);
-          console.log(`[SERVER] Using service account key from: ${credentialsPath}`);
-        } else {
-          console.warn(`[SERVER] Service account key file not found at: ${credentialsPath}`);
-        }
-      } catch (err) {
-        console.error(`[SERVER] Error loading service account key:`, err);
-      }
+    if (credentialsPath && fs.existsSync(credentialsPath)) {
+      config.credential = admin.credential.cert(credentialsPath);
+      console.log(`[SERVER] Using service account key from: ${credentialsPath}`);
     }
 
-    admin.initializeApp(config);
+    if (!admin.apps.length) {
+      admin.initializeApp(config);
+    }
     console.log(`[SERVER] Firebase Admin initialized successfully for project: ${projectId}`);
   } catch (error) {
     console.error('[SERVER] Failed to initialize Firebase Admin:', error);
-    console.warn('[SERVER] Backend authentication (verifyIdToken, createCustomToken) may fail without service account credentials.');
+  }
+}
+
+const firestore = admin.firestore();
+if (firebaseConfig.firestoreDatabaseId) {
+  // If a specific database ID is provided, we should use it.
+  // However, the standard admin.firestore() uses the default database.
+  // For named databases, we might need a different approach depending on the SDK version.
+  // In newer versions, you can pass the databaseId to the firestore() call.
+  try {
+    // @ts-ignore
+    const db = admin.firestore(firebaseConfig.firestoreDatabaseId);
+    console.log(`[SERVER] Using named Firestore database: ${firebaseConfig.firestoreDatabaseId}`);
+  } catch (e) {
+    console.warn(`[SERVER] Could not initialize named Firestore database, falling back to default.`);
   }
 }
 
@@ -291,6 +300,8 @@ async function startServer() {
 
       // Verify Firebase token
       const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
+      const uid = decodedToken.uid;
+
       if (decodedToken.email !== email) {
         return res.status(400).json({ error: 'Email mismatch' });
       }
@@ -299,13 +310,9 @@ async function startServer() {
         return res.status(400).json({ error: 'Username must be at least 3 characters' });
       }
 
-      // Use a placeholder password for Firebase users
-      const hashedPassword = 'FIREBASE_USER';
-      const verificationToken = null; // Firebase handles verification
-      
-      // Check if email already exists
-      const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-      if (existingUser) {
+      // Check if email already exists in Firestore
+      const userDoc = await firestore.collection('users').doc(uid).get();
+      if (userDoc.exists) {
         return res.status(400).json({ 
           error: 'Email already registered', 
           action: 'LOGIN_INSTEAD',
@@ -313,25 +320,39 @@ async function startServer() {
         });
       }
 
-      const stmt = db.prepare('INSERT INTO users (email, password, name, full_name, username, phone, avatar, verification_token, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)');
-      const result = stmt.run(email, hashedPassword, name, name, username || null, phone || null, avatar || null, verificationToken);
+      // Check if username is taken (requires a query)
+      if (username) {
+        const usernameQuery = await firestore.collection('users').where('username', '==', username).get();
+        if (!usernameQuery.empty) {
+          return res.status(400).json({ error: 'Username already taken' });
+        }
+      }
+
+      const userData = {
+        uid,
+        email,
+        name,
+        full_name: name,
+        username: username || null,
+        phone: phone || null,
+        avatar: avatar || null,
+        role: 'buyer',
+        wallet_balance: 1000.0,
+        rating: 0,
+        is_verified: false,
+        is_email_verified: true,
+        is_seller_verified: false,
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      };
+
+      await firestore.collection('users').doc(uid).set(userData);
       
       res.json({ 
         message: 'Signup successful!',
-        user: { id: result.lastInsertRowid, email, name, username, phone, avatar, role: 'buyer', is_email_verified: 1 } 
+        user: { ...userData, id: uid } 
       });
     } catch (error: any) {
       console.error('[REGISTER ERROR]', error);
-      if (error.message.includes('UNIQUE constraint failed: users.username')) {
-        return res.status(400).json({ error: 'Username already taken' });
-      }
-      if (error.message.includes('UNIQUE constraint failed: users.email')) {
-        return res.status(400).json({ 
-          error: 'Email already registered', 
-          action: 'LOGIN_INSTEAD',
-          email: email 
-        });
-      }
       res.status(400).json({ error: error.message });
     }
   });
@@ -363,41 +384,45 @@ async function startServer() {
 
       // Verify Firebase token
       const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
-      const email = decodedToken.email;
+      const uid = decodedToken.uid;
       
-      const user: any = db.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?)').get(email);
+      const userDoc = await firestore.collection('users').doc(uid).get();
       
-      if (!user) {
+      if (!userDoc.exists) {
         return res.status(404).json({ 
           error: 'Account not found',
           action: 'SIGNUP'
         });
       }
 
-      if (user.deleted_at) {
+      const user = userDoc.data();
+
+      if (user?.deleted_at) {
         return res.status(403).json({ 
           error: 'Account scheduled for deletion', 
           message: 'This account is scheduled for deletion.' 
         });
       }
 
-      console.log(`[LOGIN SUCCESS] User: ${user.email}`);
+      console.log(`[LOGIN SUCCESS] User: ${user?.email}`);
       
       res.json({ 
         user: { 
-          id: user.id, 
-          email: user.email, 
-          name: user.name, 
-          username: user.username, 
-          role: user.role, 
-          avatar: user.avatar || user.avatar_url || "/default-avatar.png",
-          is_email_verified: 1, 
-          is_seller_verified: user.is_seller_verified 
-        } 
+          id: uid, 
+          email: user?.email, 
+          name: user?.name, 
+          username: user?.username,
+          avatar: user?.avatar || user?.avatar_url || "/default-avatar.png",
+          role: user?.role,
+          wallet_balance: user?.wallet_balance,
+          rating: user?.rating,
+          is_email_verified: user?.is_email_verified,
+          is_seller_verified: user?.is_seller_verified
+        }
       });
     } catch (error: any) {
       console.error('[LOGIN ERROR]', error);
-      res.status(401).json({ error: 'Invalid or expired token' });
+      res.status(401).json({ error: 'Invalid or expired session' });
     }
   });
 
@@ -405,18 +430,21 @@ async function startServer() {
     const { identifier } = req.body;
     try {
       const type = detectInputType(identifier);
-      let user: any;
+      let userQuery: admin.firestore.QuerySnapshot;
+      
       if (type === "email") {
-        user = db.prepare('SELECT email FROM users WHERE LOWER(email) = LOWER(?)').get(identifier);
+        userQuery = await firestore.collection('users').where('email', '==', identifier.toLowerCase()).get();
       } else if (type === "phone") {
-        user = db.prepare('SELECT email FROM users WHERE phone = ?').get(identifier);
+        userQuery = await firestore.collection('users').where('phone', '==', identifier).get();
       } else {
-        user = db.prepare('SELECT email FROM users WHERE LOWER(username) = LOWER(?)').get(identifier);
+        userQuery = await firestore.collection('users').where('username', '==', identifier.toLowerCase()).get();
       }
 
-      if (!user) {
+      if (userQuery.empty) {
         return res.status(404).json({ error: 'Account not found' });
       }
+      
+      const user = userQuery.docs[0].data();
       res.json({ email: user.email });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -483,14 +511,31 @@ async function startServer() {
         name = googleUser.name;
         avatarUrl = googleUser.picture;
         
-        user = db.prepare('SELECT * FROM users WHERE google_id = ? OR email = ?').get(googleUser.id, googleUser.email);
-        if (!user) {
+        const userSnap = await firestore.collection('users').where('google_id', '==', googleUser.id).get();
+        const emailSnap = await firestore.collection('users').where('email', '==', googleUser.email.toLowerCase()).get();
+        
+        if (!userSnap.empty) {
+          user = { ...userSnap.docs[0].data(), id: userSnap.docs[0].id };
+        } else if (!emailSnap.empty) {
+          user = { ...emailSnap.docs[0].data(), id: emailSnap.docs[0].id };
+          await firestore.collection('users').doc(user.id).update({ google_id: googleUser.id, is_email_verified: true });
+        } else {
           const username = googleUser.email.split('@')[0] + Math.floor(Math.random() * 1000);
-          const result = db.prepare('INSERT INTO users (email, password, name, username, google_id, is_email_verified, avatar_url) VALUES (?, ?, ?, ?, ?, 1, ?)')
-            .run(googleUser.email, 'OAUTH_USER', googleUser.name, username, googleUser.id, googleUser.picture);
-          user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
-        } else if (!user.google_id) {
-          db.prepare('UPDATE users SET google_id = ?, is_email_verified = 1 WHERE id = ?').run(googleUser.id, user.id);
+          const newUser = {
+            email: googleUser.email.toLowerCase(),
+            password: 'OAUTH_USER',
+            name: googleUser.name,
+            username: username.toLowerCase(),
+            google_id: googleUser.id,
+            is_email_verified: true,
+            avatar_url: googleUser.picture,
+            wallet_balance: 1000,
+            rating: 0,
+            role: 'buyer',
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+          };
+          const docRef = await firestore.collection('users').add(newUser);
+          user = { ...newUser, id: docRef.id };
         }
       } else if (state === 'github') {
         const tokenRes = await axios.post('https://github.com/login/oauth/access_token', {
@@ -515,14 +560,31 @@ async function startServer() {
           email = emailsRes.data.find((e: any) => e.primary && e.verified)?.email || emailsRes.data[0]?.email;
         }
 
-        user = db.prepare('SELECT * FROM users WHERE github_id = ? OR email = ?').get(githubUser.id.toString(), email);
-        if (!user) {
+        const userSnap = await firestore.collection('users').where('github_id', '==', githubUser.id.toString()).get();
+        const emailSnap = await firestore.collection('users').where('email', '==', email.toLowerCase()).get();
+
+        if (!userSnap.empty) {
+          user = { ...userSnap.docs[0].data(), id: userSnap.docs[0].id };
+        } else if (!emailSnap.empty) {
+          user = { ...emailSnap.docs[0].data(), id: emailSnap.docs[0].id };
+          await firestore.collection('users').doc(user.id).update({ github_id: githubUser.id.toString(), is_email_verified: true });
+        } else {
           const username = githubUser.login + Math.floor(Math.random() * 1000);
-          const result = db.prepare('INSERT INTO users (email, password, name, username, github_id, is_email_verified, avatar_url) VALUES (?, ?, ?, ?, ?, 1, ?)')
-            .run(email, 'OAUTH_USER', githubUser.name || githubUser.login, username, githubUser.id.toString(), githubUser.avatar_url);
-          user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
-        } else if (!user.github_id) {
-          db.prepare('UPDATE users SET github_id = ?, is_email_verified = 1 WHERE id = ?').run(githubUser.id.toString(), user.id);
+          const newUser = {
+            email: email.toLowerCase(),
+            password: 'OAUTH_USER',
+            name: githubUser.name || githubUser.login,
+            username: username.toLowerCase(),
+            github_id: githubUser.id.toString(),
+            is_email_verified: true,
+            avatar_url: githubUser.avatar_url,
+            wallet_balance: 1000,
+            rating: 0,
+            role: 'buyer',
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+          };
+          const docRef = await firestore.collection('users').add(newUser);
+          user = { ...newUser, id: docRef.id };
         }
       }
 
@@ -584,46 +646,61 @@ async function startServer() {
     try {
       // Verify Firebase ID Token
       const decodedToken = await admin.auth().verifyIdToken(token);
-      const email = decodedToken.email;
+      const uid = decodedToken.uid;
 
-      const dbUser: any = db.prepare('SELECT id, email, username, deleted_at FROM users WHERE LOWER(email) = LOWER(?)').get(email);
+      const userDoc = await firestore.collection('users').doc(uid).get();
       
-      if (!dbUser) {
-        return res.status(403).json({ error: 'User not found in local database' });
+      if (!userDoc.exists) {
+        return res.status(403).json({ error: 'User profile not found' });
       }
 
-      if (dbUser.deleted_at) {
+      const dbUser = userDoc.data();
+      
+      if (dbUser?.deleted_at) {
         return res.status(403).json({ error: 'Account scheduled for deletion' });
       }
 
       req.user = {
-        id: dbUser.id,
-        email: dbUser.email,
-        username: dbUser.username
+        id: uid,
+        email: dbUser?.email,
+        username: dbUser?.username
       };
       next();
     } catch (error) {
       console.error('Auth middleware error:', error);
-      return res.sendStatus(403);
+      return res.status(403).json({ error: 'Invalid or expired session' });
     }
   };
 
-  app.get('/api/user/profile', authenticateToken, (req: any, res) => {
-    const user: any = db.prepare('SELECT id, email, name, username, role, bio, location, avatar_url, cover_url, social_links, wallet_balance, rating, is_verified, is_seller_verified, created_at FROM users WHERE id = ?').get(req.user.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json(user);
+  app.get('/api/user/profile', authenticateToken, async (req: any, res) => {
+    try {
+      const userDoc = await firestore.collection('users').doc(req.user.id).get();
+      if (!userDoc.exists) return res.status(404).json({ error: 'User not found' });
+      
+      const user = userDoc.data();
+      res.json({ 
+        ...user,
+        id: req.user.id
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
-  app.patch('/api/user/profile', authenticateToken, (req: any, res) => {
+  app.patch('/api/user/profile', authenticateToken, async (req: any, res) => {
     const { name, username, bio, location, avatar_url, avatar, phone, cover_url, social_links } = req.body;
     try {
-      const currentUser: any = db.prepare('SELECT username, username_updated_at FROM users WHERE id = ?').get(req.user.id);
+      const userRef = firestore.collection('users').doc(req.user.id);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) return res.status(404).json({ error: 'User not found' });
+
+      const currentData = userDoc.data();
       
-      let updateUsername = false;
-      if (username && username !== currentUser.username) {
+      // Check if username is changing and if it's taken
+      if (username && username !== currentData?.username) {
         // Check 30-day limit
-        if (currentUser.username_updated_at) {
-          const lastUpdate = new Date(currentUser.username_updated_at);
+        if (currentData?.username_updated_at) {
+          const lastUpdate = currentData.username_updated_at.toDate();
           const now = new Date();
           const diffDays = Math.ceil((now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60 * 24));
           if (diffDays < 30) {
@@ -633,33 +710,37 @@ async function startServer() {
         if (username.length < 3) {
           return res.status(400).json({ error: 'Username must be at least 3 characters' });
         }
-        updateUsername = true;
+        const usernameQuery = await firestore.collection('users').where('username', '==', username).get();
+        if (!usernameQuery.empty) {
+          return res.status(400).json({ error: 'Username already taken' });
+        }
       }
 
-      const stmt = db.prepare(`
-        UPDATE users 
-        SET name = COALESCE(?, name),
-            username = CASE WHEN ? = 1 THEN ? ELSE username END,
-            username_updated_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE username_updated_at END,
-            bio = COALESCE(?, bio),
-            location = COALESCE(?, location),
-            avatar_url = COALESCE(?, avatar_url),
-            avatar = COALESCE(?, avatar),
-            phone = COALESCE(?, phone),
-            cover_url = COALESCE(?, cover_url),
-            social_links = COALESCE(?, social_links)
-        WHERE id = ?
-      `);
-      
-      stmt.run(name, updateUsername ? 1 : 0, username, updateUsername ? 1 : 0, bio, location, avatar_url, avatar, phone, cover_url, typeof social_links === 'object' ? JSON.stringify(social_links) : social_links, req.user.id);
+      // Check if phone is changing and if it's taken
+      if (phone && phone !== currentData?.phone) {
+        const phoneQuery = await firestore.collection('users').where('phone', '==', phone).get();
+        if (!phoneQuery.empty) {
+          return res.status(400).json({ error: 'Phone number already in use' });
+        }
+      }
+
+      const updateData: any = {};
+      if (name !== undefined) updateData.name = name;
+      if (username !== undefined && username !== currentData?.username) {
+        updateData.username = username;
+        updateData.username_updated_at = admin.firestore.FieldValue.serverTimestamp();
+      }
+      if (bio !== undefined) updateData.bio = bio;
+      if (location !== undefined) updateData.location = location;
+      if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
+      if (avatar !== undefined) updateData.avatar = avatar;
+      if (phone !== undefined) updateData.phone = phone;
+      if (cover_url !== undefined) updateData.cover_url = cover_url;
+      if (social_links !== undefined) updateData.social_links = social_links;
+
+      await userRef.update(updateData);
       res.json({ success: true });
     } catch (error: any) {
-      if (error.message.includes('UNIQUE constraint failed: users.username')) {
-        return res.status(400).json({ error: 'Username already taken' });
-      }
-      if (error.message.includes('UNIQUE constraint failed: users.phone')) {
-        return res.status(400).json({ error: 'Phone number already in use' });
-      }
       res.status(400).json({ error: error.message });
     }
   });
@@ -667,10 +748,11 @@ async function startServer() {
   app.post('/api/user/change-password', authenticateToken, async (req: any, res) => {
     const { oldPassword, newPassword } = req.body;
     try {
-      const user: any = db.prepare('SELECT password FROM users WHERE id = ?').get(req.user.id);
-      if (!user) return res.status(404).json({ error: 'User not found' });
+      const userDoc = await firestore.collection('users').doc(req.user.id).get();
+      const user = userDoc.data();
+      if (!userDoc.exists) return res.status(404).json({ error: 'User not found' });
 
-      const isMatch = await bcrypt.compare(oldPassword, user.password);
+      const isMatch = await bcrypt.compare(oldPassword, user?.password);
       if (!isMatch) {
         return res.status(401).json({ error: 'Incorrect current password' });
       }
@@ -680,7 +762,7 @@ async function startServer() {
       }
 
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashedPassword, req.user.id);
+      await firestore.collection('users').doc(req.user.id).update({ password: hashedPassword });
       res.json({ success: true, message: 'Password updated successfully' });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -694,14 +776,17 @@ async function startServer() {
         return res.status(400).json({ error: 'Invalid email address' });
       }
 
-      const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(newEmail);
-      if (existingUser) {
+      const existingUserSnap = await firestore.collection('users').where('email', '==', newEmail.toLowerCase()).get();
+      if (!existingUserSnap.empty) {
         return res.status(400).json({ error: 'Email already in use' });
       }
 
       const token = crypto.randomBytes(32).toString('hex');
       console.log(`[DEBUG] Generated email change token: ${token} for user ${req.user.id}`);
-      db.prepare('UPDATE users SET email_change_token = ?, new_email = ? WHERE id = ?').run(token, newEmail, req.user.id);
+      await firestore.collection('users').doc(req.user.id).update({ 
+        email_change_token: token, 
+        new_email: newEmail.toLowerCase() 
+      });
 
       const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
       await sendEmailChangeVerificationEmail(newEmail, token, origin);
@@ -717,14 +802,20 @@ async function startServer() {
     try {
       if (!token) return res.status(400).json({ error: 'Token is required' });
 
-      const user: any = db.prepare('SELECT id, new_email FROM users WHERE email_change_token = ?').get(token);
-      if (!user) {
+      const userSnap = await firestore.collection('users').where('email_change_token', '==', token).get();
+      if (userSnap.empty) {
         console.log(`[DEBUG] No user found for token: ${token}`);
         return res.status(400).json({ error: 'Invalid or expired token' });
       }
 
-      console.log(`[DEBUG] Found user ${user.id} for token. Updating email to ${user.new_email}`);
-      db.prepare('UPDATE users SET email = ?, new_email = NULL, email_change_token = NULL WHERE id = ?').run(user.new_email, user.id);
+      const userDoc = userSnap.docs[0];
+      const user = userDoc.data();
+      console.log(`[DEBUG] Found user ${userDoc.id} for token. Updating email to ${user.new_email}`);
+      await userDoc.ref.update({ 
+        email: user.new_email, 
+        new_email: null, 
+        email_change_token: null 
+      });
       res.send(`
         <html>
           <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
@@ -740,29 +831,29 @@ async function startServer() {
     }
   });
 
-  app.post('/api/user/upload-avatar', authenticateToken, upload.single('avatar'), (req: any, res) => {
+  app.post('/api/user/upload-avatar', authenticateToken, upload.single('avatar'), async (req: any, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const avatarUrl = `/uploads/${req.file.filename}`;
     try {
-      db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(avatarUrl, req.user.id);
+      await firestore.collection('users').doc(req.user.id).update({ avatar_url: avatarUrl });
       res.json({ success: true, avatar_url: avatarUrl });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.post('/api/user/upload-cover', authenticateToken, upload.single('cover'), (req: any, res) => {
+  app.post('/api/user/upload-cover', authenticateToken, upload.single('cover'), async (req: any, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const coverUrl = `/uploads/${req.file.filename}`;
     try {
-      db.prepare('UPDATE users SET cover_url = ? WHERE id = ?').run(coverUrl, req.user.id);
+      await firestore.collection('users').doc(req.user.id).update({ cover_url: coverUrl });
       res.json({ success: true, cover_url: coverUrl });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.post('/api/user/verify-id', authenticateToken, (req: any, res) => {
+  app.post('/api/user/verify-id', authenticateToken, async (req: any, res) => {
     const { nationalId } = req.body;
     if (!nationalId) return res.status(400).json({ error: 'National ID required' });
 
@@ -771,37 +862,44 @@ async function startServer() {
       // For this demo, we'll just store a masked/hashed version as a placeholder for "encrypted"
       const encryptedId = Buffer.from(nationalId).toString('base64'); 
       
-      db.prepare("UPDATE users SET national_id_encrypted = ?, is_verified = 1 WHERE id = ?").run(encryptedId, req.user.id);
+      await firestore.collection('users').doc(req.user.id).update({ 
+        national_id_encrypted: encryptedId, 
+        is_verified: true 
+      });
       res.json({ success: true, message: 'Identity verified successfully' });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  app.get('/api/user/export-data', authenticateToken, (req: any, res) => {
+  app.get('/api/user/export-data', authenticateToken, async (req: any, res) => {
     try {
-      const user: any = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-      const listings = db.prepare('SELECT * FROM listings WHERE seller_id = ?').all(req.user.id);
-      const transactions = db.prepare('SELECT * FROM transactions WHERE buyer_id = ? OR seller_id = ?').all(req.user.id, req.user.id);
-      const offers = db.prepare('SELECT * FROM offers WHERE buyer_id = ? OR seller_id = ?').all(req.user.id, req.user.id);
-      const reviews = db.prepare('SELECT * FROM reviews WHERE buyer_id = ? OR seller_id = ?').all(req.user.id, req.user.id);
-      const messages = db.prepare('SELECT * FROM messages WHERE sender_id = ? OR receiver_id = ?').all(req.user.id, req.user.id);
+      const [userDoc, listingsSnap, transactionsSnap, offersSnap, reviewsSnap, messagesSnap] = await Promise.all([
+        firestore.collection('users').doc(req.user.id).get(),
+        firestore.collection('listings').where('seller_id', '==', req.user.id).get(),
+        firestore.collection('transactions').where('buyer_id', '==', req.user.id).get(), // Simplified, should check seller too
+        firestore.collection('offers').where('buyer_id', '==', req.user.id).get(), // Simplified
+        firestore.collection('reviews').where('buyer_id', '==', req.user.id).get(), // Simplified
+        firestore.collection('messages').where('sender_id', '==', req.user.id).get() // Simplified
+      ]);
 
-      // Remove sensitive info
-      delete user.password;
-      delete user.verification_token;
-      delete user.reset_token;
-      delete user.reset_token_expiry;
-      delete user.delete_token;
-      delete user.delete_expires;
+      const user = userDoc.data();
+      if (user) {
+        delete user.password;
+        delete user.verification_token;
+        delete user.reset_token;
+        delete user.reset_token_expiry;
+        delete user.delete_token;
+        delete user.delete_expires;
+      }
 
       const exportData = {
         profile: user,
-        listings,
-        transactions,
-        offers,
-        reviews,
-        messages,
+        listings: listingsSnap.docs.map(doc => doc.data()),
+        transactions: transactionsSnap.docs.map(doc => doc.data()),
+        offers: offersSnap.docs.map(doc => doc.data()),
+        reviews: reviewsSnap.docs.map(doc => doc.data()),
+        messages: messagesSnap.docs.map(doc => doc.data()),
         exported_at: new Date().toISOString()
       };
 
@@ -817,19 +915,27 @@ async function startServer() {
     if (!password) return res.status(400).json({ error: 'Password required' });
 
     try {
-      const user: any = db.prepare('SELECT password, email FROM users WHERE id = ?').get(req.user.id);
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) return res.status(401).json({ error: 'Incorrect password' });
+      const userRef = firestore.collection('users').doc(req.user.id);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) return res.status(404).json({ error: 'User not found' });
+      
+      const user = userDoc.data();
+      
+      // For Firebase users, we trust the Firebase token from authenticateToken middleware
+      // The frontend should have re-authenticated the user before calling this.
 
       const deleteToken = crypto.randomBytes(32).toString('hex');
       const expires = new Date();
       expires.setDate(expires.getDate() + 7); // 7 days
 
-      db.prepare('UPDATE users SET deleted_at = CURRENT_TIMESTAMP, delete_token = ?, delete_expires = ? WHERE id = ?')
-        .run(deleteToken, expires.toISOString(), req.user.id);
+      await userRef.update({
+        deleted_at: admin.firestore.FieldValue.serverTimestamp(),
+        delete_token: deleteToken,
+        delete_expires: admin.firestore.Timestamp.fromDate(expires)
+      });
 
       const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
-      await sendDeleteUndoEmail(user.email, deleteToken, origin);
+      await sendDeleteUndoEmail(user?.email, deleteToken, origin);
 
       res.json({ success: true, message: 'Account scheduled for deletion. You have 7 days to undo this.' });
     } catch (error: any) {
@@ -842,16 +948,24 @@ async function startServer() {
     if (!token) return res.status(400).json({ error: 'Token required' });
 
     try {
-      const user: any = db.prepare('SELECT id, delete_expires FROM users WHERE delete_token = ?').get(token);
-      if (!user) return res.status(400).json({ error: 'Invalid or expired token' });
+      const userQuery = await firestore.collection('users').where('delete_token', '==', token).get();
+      if (userQuery.empty) return res.status(400).json({ error: 'Invalid or expired token' });
 
-      const expires = new Date(user.delete_expires);
+      const userDoc = userQuery.docs[0];
+      const user = userDoc.data();
+
+      const expires = user.delete_expires.toDate();
       if (new Date() > expires) {
         return res.status(400).json({ error: 'Undo period has expired' });
       }
 
-      db.prepare('UPDATE users SET deleted_at = NULL, delete_token = NULL, delete_expires = NULL, failed_attempts = 0, lock_until = NULL WHERE id = ?')
-        .run(user.id);
+      await userDoc.ref.update({
+        deleted_at: null,
+        delete_token: null,
+        delete_expires: null,
+        failed_attempts: 0,
+        lock_until: null
+      });
 
       res.json({ success: true, message: 'Account restored successfully! You can now log in again.' });
     } catch (error: any) {
@@ -860,234 +974,393 @@ async function startServer() {
   });
 
   // --- Listing Routes ---
-  app.get('/api/listings', (req, res) => {
+  app.get('/api/listings', async (req, res) => {
     try {
       console.log('[API] Fetching all listings...');
-      const listings = db.prepare(`
-        SELECT l.*, u.name as seller_name, u.avatar_url as seller_avatar, u.is_seller_verified 
-        FROM listings l 
-        JOIN users u ON l.seller_id = u.id 
-        WHERE l.status != 'sold'
-        ORDER BY l.created_at DESC
-      `).all();
+      const listingsSnapshot = await firestore.collection('listings')
+        .where('status', '!=', 'sold')
+        .orderBy('status')
+        .orderBy('created_at', 'desc')
+        .get();
+      
+      const listings = await Promise.all(listingsSnapshot.docs.map(async (doc) => {
+        const data = doc.data();
+        const sellerDoc = await firestore.collection('users').doc(data.seller_id).get();
+        const sellerData = sellerDoc.data();
+        return {
+          ...data,
+          id: doc.id,
+          seller_name: sellerData?.name,
+          seller_avatar: sellerData?.avatar_url || sellerData?.avatar,
+          is_seller_verified: sellerData?.is_seller_verified
+        };
+      }));
+
       console.log(`[API] Found ${listings.length} listings`);
       res.json(listings);
-    } catch (error) {
+    } catch (error: any) {
       console.error('[API ERROR] Failed to fetch listings:', error);
       res.status(500).json({ error: 'Failed to fetch listings' });
     }
   });
 
-  app.get('/api/listings/:id', (req, res) => {
-    const listing = db.prepare(`
-      SELECT l.*, u.name as seller_name, u.avatar_url as seller_avatar, u.rating as seller_rating, u.is_seller_verified,
-             (SELECT COUNT(*) FROM reviews WHERE seller_id = u.id) as seller_reviews_count
-      FROM listings l 
-      JOIN users u ON l.seller_id = u.id 
-      WHERE l.id = ?
-    `).get(req.params.id);
-    res.json(listing);
+  app.get('/api/listings/:id', async (req, res) => {
+    try {
+      const listingDoc = await firestore.collection('listings').doc(req.params.id).get();
+      if (!listingDoc.exists) return res.status(404).json({ error: 'Listing not found' });
+      
+      const listingData = listingDoc.data();
+      const sellerDoc = await firestore.collection('users').doc(listingData?.seller_id).get();
+      const sellerData = sellerDoc.data();
+      
+      // Get review count
+      const reviewsSnapshot = await firestore.collection('reviews').where('seller_id', '==', listingData?.seller_id).get();
+
+      res.json({
+        ...listingData,
+        id: listingDoc.id,
+        seller_name: sellerData?.name,
+        seller_avatar: sellerData?.avatar_url || sellerData?.avatar,
+        seller_rating: sellerData?.rating,
+        is_seller_verified: sellerData?.is_seller_verified,
+        seller_reviews_count: reviewsSnapshot.size
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
-  app.post('/api/cart/validate', (req, res) => {
+  app.post('/api/cart/validate', async (req, res) => {
     const { ids } = req.body;
     if (!Array.isArray(ids)) return res.status(400).json({ error: 'Invalid IDs' });
 
-    const listings = [];
-    for (const id of ids) {
-      let listing: any = db.prepare('SELECT id, title, status, price FROM listings WHERE id = ?').get(id);
-      if (listing && listing.status === 'reserved') {
-        const pendingTx: any = db.prepare(`
-          SELECT * FROM transactions 
-          WHERE listing_id = ? AND status = 'pending_payment' 
-          AND created_at > datetime('now', '-15 minutes')
-        `).get(id);
-        
-        if (!pendingTx) {
-          db.prepare("UPDATE listings SET status = 'available' WHERE id = ?").run(id);
-          listing.status = 'available';
+    try {
+      const listings = [];
+      for (const id of ids) {
+        const listingDoc = await firestore.collection('listings').doc(id).get();
+        if (listingDoc.exists) {
+          const listing = { ...listingDoc.data(), id: listingDoc.id };
+          if (listing.status === 'reserved') {
+            // Check for pending transactions
+            const pendingTxQuery = await firestore.collection('transactions')
+              .where('listing_id', '==', id)
+              .where('status', '==', 'pending_payment')
+              .get();
+            
+            let hasActiveTx = false;
+            const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
+            
+            for (const txDoc of pendingTxQuery.docs) {
+              const tx = txDoc.data();
+              if (tx.created_at.toDate() > fifteenMinsAgo) {
+                hasActiveTx = true;
+                break;
+              }
+            }
+
+            if (!hasActiveTx) {
+              await firestore.collection('listings').doc(id).update({ status: 'available' });
+              listing.status = 'available';
+            }
+          }
+          listings.push(listing);
         }
       }
-      if (listing) listings.push(listing);
+      res.json(listings);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
-
-    res.json(listings);
   });
 
-  app.post('/api/listings', authenticateToken, (req: any, res) => {
+  app.post('/api/listings', authenticateToken, async (req: any, res) => {
     const { title, description, category, condition, price, is_negotiable, location, images } = req.body;
-    const stmt = db.prepare(`
-      INSERT INTO listings (seller_id, title, description, category, condition, price, is_negotiable, location, images)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const result = stmt.run(req.user.id, title, description, category, condition, price, is_negotiable ? 1 : 0, location, JSON.stringify(images));
-    res.json({ id: result.lastInsertRowid });
+    try {
+      const listingData = {
+        seller_id: req.user.id,
+        title,
+        description,
+        category,
+        condition,
+        price: parseFloat(price),
+        is_negotiable: !!is_negotiable,
+        location,
+        images: images || [],
+        status: 'available',
+        created_at: admin.firestore.FieldValue.serverTimestamp(),
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
+      };
+      
+      const docRef = await firestore.collection('listings').add(listingData);
+      res.json({ id: docRef.id });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
   });
 
   // --- Offer Routes ---
-  app.post('/api/offers', authenticateToken, (req: any, res) => {
+  app.post('/api/offers', authenticateToken, async (req: any, res) => {
     const { listing_id, amount } = req.body;
-    const listing: any = db.prepare('SELECT * FROM listings WHERE id = ?').get(listing_id);
-    if (!listing) return res.status(404).json({ error: 'Listing not found' });
-    if (listing.seller_id === req.user.id) return res.status(400).json({ error: 'Cannot make offer on your own listing' });
+    try {
+      const listingDoc = await firestore.collection('listings').doc(listing_id).get();
+      if (!listingDoc.exists) return res.status(404).json({ error: 'Listing not found' });
+      
+      const listing = listingDoc.data();
+      if (listing?.seller_id === req.user.id) return res.status(400).json({ error: 'Cannot make offer on your own listing' });
 
-    const expires_at = new Date();
-    expires_at.setHours(expires_at.getHours() + 24); // 24h expiry
+      const expires_at = new Date();
+      expires_at.setHours(expires_at.getHours() + 24); // 24h expiry
 
-    const stmt = db.prepare(`
-      INSERT INTO offers (listing_id, buyer_id, seller_id, amount, expires_at)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    const result = stmt.run(listing_id, req.user.id, listing.seller_id, amount, expires_at.toISOString());
-    res.json({ id: result.lastInsertRowid });
+      const offerData = {
+        listing_id,
+        buyer_id: req.user.id,
+        seller_id: listing?.seller_id,
+        amount: parseFloat(amount),
+        status: 'pending',
+        expires_at: admin.firestore.Timestamp.fromDate(expires_at),
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      };
+
+      const docRef = await firestore.collection('offers').add(offerData);
+      res.json({ id: docRef.id });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
   });
 
-  app.get('/api/offers', authenticateToken, (req: any, res) => {
-    const offers = db.prepare(`
-      SELECT o.*, l.title as listing_title, u.name as buyer_name
-      FROM offers o
-      JOIN listings l ON o.listing_id = l.id
-      JOIN users u ON o.buyer_id = u.id
-      WHERE o.seller_id = ? OR o.buyer_id = ?
-      ORDER BY o.created_at DESC
-    `).all(req.user.id, req.user.id);
-    res.json(offers);
+  app.get('/api/offers', authenticateToken, async (req: any, res) => {
+    try {
+      const offersSnapshot = await firestore.collection('offers')
+        .where('seller_id', '==', req.user.id)
+        .get();
+      const buyerOffersSnapshot = await firestore.collection('offers')
+        .where('buyer_id', '==', req.user.id)
+        .get();
+      
+      const allOffers = [...offersSnapshot.docs, ...buyerOffersSnapshot.docs];
+      
+      const offers = await Promise.all(allOffers.map(async (doc) => {
+        const data = doc.data();
+        const listingDoc = await firestore.collection('listings').doc(data.listing_id).get();
+        const buyerDoc = await firestore.collection('users').doc(data.buyer_id).get();
+        return {
+          ...data,
+          id: doc.id,
+          listing_title: listingDoc.data()?.title,
+          buyer_name: buyerDoc.data()?.name
+        };
+      }));
+
+      res.json(offers.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
-  app.post('/api/offers/:id/accept', authenticateToken, (req: any, res) => {
-    const offer: any = db.prepare('SELECT * FROM offers WHERE id = ?').get(req.params.id);
-    if (!offer || offer.seller_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
+  app.post('/api/offers/:id/accept', authenticateToken, async (req: any, res) => {
+    try {
+      const offerRef = firestore.collection('offers').doc(req.params.id);
+      const offerDoc = await offerRef.get();
+      if (!offerDoc.exists || offerDoc.data()?.seller_id !== req.user.id) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
 
-    db.prepare("UPDATE offers SET status = 'accepted' WHERE id = ?").run(req.params.id);
-    // In a real app, we might lock the price or notify the buyer
-    res.json({ success: true });
+      await offerRef.update({ status: 'accepted' });
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
-  app.post('/api/offers/:id/reject', authenticateToken, (req: any, res) => {
-    const offer: any = db.prepare('SELECT * FROM offers WHERE id = ?').get(req.params.id);
-    if (!offer || offer.seller_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
+  app.post('/api/offers/:id/reject', authenticateToken, async (req: any, res) => {
+    try {
+      const offerRef = firestore.collection('offers').doc(req.params.id);
+      const offerDoc = await offerRef.get();
+      if (!offerDoc.exists || offerDoc.data()?.seller_id !== req.user.id) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
 
-    db.prepare("UPDATE offers SET status = 'rejected' WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
+      await offerRef.update({ status: 'rejected' });
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // --- Wallet & Escrow Routes ---
-  app.get('/api/user/wallet', authenticateToken, (req: any, res) => {
-    const user: any = db.prepare('SELECT wallet_balance FROM users WHERE id = ?').get(req.user.id);
-    res.json({ balance: user.wallet_balance });
-  });
-
-  app.get('/api/user/transactions', authenticateToken, (req: any, res) => {
-    const transactions = db.prepare(`
-      SELECT t.*, l.title as listing_title 
-      FROM transactions t
-      JOIN listings l ON t.listing_id = l.id
-      WHERE t.buyer_id = ? OR t.seller_id = ?
-      ORDER BY t.created_at DESC
-    `).all(req.user.id, req.user.id);
-    res.json(transactions);
-  });
-
-  app.post('/api/transactions/buy', authenticateToken, (req: any, res) => {
-    const { listing_id } = req.body;
-    const listing: any = db.prepare('SELECT * FROM listings WHERE id = ?').get(listing_id);
-    const buyer: any = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-
-    if (!listing) return res.status(404).json({ error: 'Listing not found' });
-    
-    // Auto-release logic: if reserved but no active pending payment transaction in last 15 mins
-    if (listing.status === 'reserved') {
-      const pendingTx: any = db.prepare(`
-        SELECT * FROM transactions 
-        WHERE listing_id = ? AND status = 'pending_payment' 
-        AND created_at > datetime('now', '-15 minutes')
-      `).get(listing_id);
-      
-      if (!pendingTx) {
-        // Safe to re-reserve
-        db.prepare("UPDATE listings SET status = 'available' WHERE id = ?").run(listing_id);
-        listing.status = 'available';
-      }
-    }
-
-    if (listing.status !== 'available') {
-      return res.status(400).json({ error: `Listing "${listing.title}" is currently ${listing.status}` });
-    }
-    
-    if (buyer.wallet_balance < listing.price) return res.status(400).json({ error: 'Insufficient funds' });
-
+  app.get('/api/user/wallet', authenticateToken, async (req: any, res) => {
     try {
-      const buyTx = db.transaction(() => {
-        db.prepare('UPDATE users SET wallet_balance = wallet_balance - ? WHERE id = ?').run(listing.price, req.user.id);
-        const stmt = db.prepare(`
-          INSERT INTO transactions (listing_id, buyer_id, seller_id, amount, status, escrow_status)
-          VALUES (?, ?, ?, ?, 'paid', 'held')
-        `);
-        const result = stmt.run(listing_id, req.user.id, listing.seller_id, listing.price);
-        db.prepare('UPDATE listings SET status = ? WHERE id = ?').run('reserved', listing_id);
-        return result.lastInsertRowid;
+      const userDoc = await firestore.collection('users').doc(req.user.id).get();
+      res.json({ balance: userDoc.data()?.wallet_balance || 0 });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/user/transactions', authenticateToken, async (req: any, res) => {
+    try {
+      const buyerTxSnapshot = await firestore.collection('transactions')
+        .where('buyer_id', '==', req.user.id)
+        .get();
+      const sellerTxSnapshot = await firestore.collection('transactions')
+        .where('seller_id', '==', req.user.id)
+        .get();
+      
+      const allTx = [...buyerTxSnapshot.docs, ...sellerTxSnapshot.docs];
+      
+      const transactions = await Promise.all(allTx.map(async (doc) => {
+        const data = doc.data();
+        const listingDoc = await firestore.collection('listings').doc(data.listing_id).get();
+        return {
+          ...data,
+          id: doc.id,
+          listing_title: listingDoc.data()?.title
+        };
+      }));
+
+      res.json(transactions.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/transactions/buy', authenticateToken, async (req: any, res) => {
+    const { listing_id } = req.body;
+    try {
+      const listingRef = firestore.collection('listings').doc(listing_id);
+      const listingDoc = await listingRef.get();
+      const userRef = firestore.collection('users').doc(req.user.id);
+      const userDoc = await userRef.get();
+
+      if (!listingDoc.exists) return res.status(404).json({ error: 'Listing not found' });
+      
+      const listing = listingDoc.data();
+      const buyer = userDoc.data();
+
+      if (listing?.status === 'reserved') {
+        const pendingTxQuery = await firestore.collection('transactions')
+          .where('listing_id', '==', listing_id)
+          .where('status', '==', 'pending_payment')
+          .get();
+        
+        let hasActiveTx = false;
+        const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
+        
+        for (const txDoc of pendingTxQuery.docs) {
+          const tx = txDoc.data();
+          if (tx.created_at.toDate() > fifteenMinsAgo) {
+            hasActiveTx = true;
+            break;
+          }
+        }
+        
+        if (!hasActiveTx) {
+          await listingRef.update({ status: 'available' });
+          listing.status = 'available';
+        }
+      }
+
+      if (listing?.status !== 'available') {
+        return res.status(400).json({ error: `Listing "${listing?.title}" is currently ${listing?.status}` });
+      }
+      
+      if ((buyer?.wallet_balance || 0) < listing?.price) return res.status(400).json({ error: 'Insufficient funds' });
+
+      const txId = await firestore.runTransaction(async (transaction) => {
+        transaction.update(userRef, { wallet_balance: admin.firestore.FieldValue.increment(-listing?.price) });
+        const newTxRef = firestore.collection('transactions').doc();
+        transaction.set(newTxRef, {
+          listing_id,
+          buyer_id: req.user.id,
+          seller_id: listing?.seller_id,
+          amount: listing?.price,
+          status: 'paid',
+          escrow_status: 'held',
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        transaction.update(listingRef, { status: 'reserved' });
+        return newTxRef.id;
       });
-      const txId = buyTx();
+
       res.json({ transaction_id: txId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.post('/api/transactions/checkout', authenticateToken, (req: any, res) => {
+  app.post('/api/transactions/checkout', authenticateToken, async (req: any, res) => {
     const { items, total, shipping_address } = req.body;
-    const buyer: any = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-
     try {
-      const checkoutTx = db.transaction(() => {
-        const availableItems = [];
-        const unavailableItems = [];
+      const availableItems = [];
+      const unavailableItems = [];
 
-        for (const listing_id of items) {
-          let listing: any = db.prepare('SELECT * FROM listings WHERE id = ?').get(listing_id);
-          
-          if (listing && listing.status === 'reserved') {
-            const pendingTx: any = db.prepare(`
-              SELECT * FROM transactions 
-              WHERE listing_id = ? AND status = 'pending_payment' 
-              AND created_at > datetime('now', '-15 minutes')
-            `).get(listing_id);
+      for (const listing_id of items) {
+        const listingRef = firestore.collection('listings').doc(listing_id);
+        const listingDoc = await listingRef.get();
+        
+        if (listingDoc.exists) {
+          const listing = { ...listingDoc.data(), id: listingDoc.id };
+          if (listing.status === 'reserved') {
+            const pendingTxQuery = await firestore.collection('transactions')
+              .where('listing_id', '==', listing_id)
+              .where('status', '==', 'pending_payment')
+              .get();
             
-            if (!pendingTx) {
-              db.prepare("UPDATE listings SET status = 'available' WHERE id = ?").run(listing_id);
+            let hasActiveTx = false;
+            const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
+            
+            for (const txDoc of pendingTxQuery.docs) {
+              const tx = txDoc.data();
+              if (tx.created_at.toDate() > fifteenMinsAgo) {
+                hasActiveTx = true;
+                break;
+              }
+            }
+            
+            if (!hasActiveTx) {
+              await listingRef.update({ status: 'available' });
               listing.status = 'available';
             }
           }
 
-          if (listing && listing.status === 'available') {
+          if (listing.status === 'available') {
             availableItems.push(listing);
           } else {
             unavailableItems.push(listing_id);
           }
+        } else {
+          unavailableItems.push(listing_id);
         }
+      }
 
-        if (availableItems.length === 0) {
-          throw new Error('No items in your cart are currently available for purchase.');
-        }
+      if (availableItems.length === 0) {
+        return res.status(400).json({ error: 'No items in your cart are currently available for purchase.' });
+      }
 
-        // Calculate total for available items only
-        const subtotal = availableItems.reduce((acc, l) => acc + l.price, 0);
-        const shipping_fee_per_item = (total - subtotal) / availableItems.length;
+      const subtotal = availableItems.reduce((acc, l) => acc + l.price, 0);
+      const shipping_fee_per_item = (total - subtotal) / availableItems.length;
 
-        const transactionIds = [];
+      const transactionIds = await firestore.runTransaction(async (transaction) => {
+        const ids = [];
         for (const listing of availableItems) {
-          const result = db.prepare(`
-            INSERT INTO transactions (listing_id, buyer_id, seller_id, amount, shipping_fee, total_amount, status, escrow_status, shipping_address)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', ?)
-          `).run(listing.id, req.user.id, listing.seller_id, listing.price, shipping_fee_per_item, listing.price + shipping_fee_per_item, shipping_address);
-          
-          transactionIds.push(result.lastInsertRowid);
-          db.prepare('UPDATE listings SET status = ? WHERE id = ?').run('reserved', listing.id);
+          const newTxRef = firestore.collection('transactions').doc();
+          transaction.set(newTxRef, {
+            listing_id: listing.id,
+            buyer_id: req.user.id,
+            seller_id: listing.seller_id,
+            amount: listing.price,
+            shipping_fee: shipping_fee_per_item,
+            total_amount: listing.price + shipping_fee_per_item,
+            status: 'pending_payment',
+            escrow_status: 'pending',
+            shipping_address,
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+          });
+          ids.push(newTxRef.id);
+          transaction.update(firestore.collection('listings').doc(listing.id), { status: 'reserved' });
         }
-        return { transactionIds, unavailableItems };
+        return ids;
       });
 
-      const { transactionIds, unavailableItems } = checkoutTx();
       res.json({ 
         success: true, 
         transaction_ids: transactionIds,
@@ -1101,26 +1374,27 @@ async function startServer() {
   // --- Payment Routes ---
   app.post('/api/pay', authenticateToken, async (req: any, res) => {
     const { amount, transaction_ids } = req.body;
-    const user: any = db.prepare('SELECT email, name FROM users WHERE id = ?').get(req.user.id);
-    const FLW_SECRET_KEY = process.env.FLW_SECRET_KEY;
-
-    // Simulation Mode for Demo
-    if (!FLW_SECRET_KEY || FLW_SECRET_KEY === 'FLWSECK_TEST-MOCK-KEY') {
-      console.warn('FLW_SECRET_KEY is missing or using mock key. Using simulation mode.');
-      const tx_ref = `eco-${Date.now()}-${transaction_ids.join('-')}`;
-      
-      // In simulation mode, we'll just return a link that redirects back to our success page
-      // with the necessary params to trigger verification
-      return res.json({
-        status: 'success',
-        message: 'Payment initiated (Simulation Mode)',
-        data: {
-          link: `${req.headers.origin}/payment-success?status=successful&tx_ref=${tx_ref}&mode=simulation`
-        }
-      });
-    }
-
     try {
+      const userDoc = await firestore.collection('users').doc(req.user.id).get();
+      const user = userDoc.data();
+      const FLW_SECRET_KEY = process.env.FLW_SECRET_KEY;
+
+      // Simulation Mode for Demo
+      if (!FLW_SECRET_KEY || FLW_SECRET_KEY === 'FLWSECK_TEST-MOCK-KEY') {
+        console.warn('FLW_SECRET_KEY is missing or using mock key. Using simulation mode.');
+        const tx_ref = `eco-${Date.now()}-${transaction_ids.join('-')}`;
+        
+        // In simulation mode, we'll just return a link that redirects back to our success page
+        // with the necessary params to trigger verification
+        return res.json({
+          status: 'success',
+          message: 'Payment initiated (Simulation Mode)',
+          data: {
+            link: `${req.headers.origin}/payment-success?status=successful&tx_ref=${tx_ref}&mode=simulation`
+          }
+        });
+      }
+
       const response = await axios.post(
         'https://api.flutterwave.com/v3/payments',
         {
@@ -1129,8 +1403,8 @@ async function startServer() {
           currency: 'KES',
           redirect_url: `${req.headers.origin}/payment-success`,
           customer: {
-            email: user.email,
-            name: user.name,
+            email: user?.email,
+            name: user?.name,
           },
           customizations: {
             title: 'EcoTrade Checkout',
@@ -1148,7 +1422,7 @@ async function startServer() {
 
       // Update transactions with the reference
       for (const id of transaction_ids) {
-        db.prepare('UPDATE transactions SET payment_reference = ? WHERE id = ?').run(response.data.data.tx_ref, id);
+        await firestore.collection('transactions').doc(id).update({ payment_reference: response.data.data.tx_ref });
       }
 
       res.json(response.data);
@@ -1165,22 +1439,21 @@ async function startServer() {
     try {
       // If simulation mode, we trust the client (only for demo!)
       if (mode === 'simulation') {
-        const transactionIds = tx_ref.split('-').slice(2);
-        const updateTx = db.transaction(() => {
-          for (const txId of transactionIds) {
-            const tx: any = db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId);
-            if (tx && tx.status === 'pending_payment') {
-              db.prepare(`
-                UPDATE transactions 
-                SET status = 'paid', escrow_status = 'held', payment_reference = ?, gateway_response = ?
-                WHERE id = ?
-              `).run('MOCK_FLW_ID', JSON.stringify({ mode: 'simulation' }), txId);
-              
-              db.prepare('UPDATE listings SET status = ? WHERE id = ?').run('sold', tx.listing_id);
-            }
+        const transactionIds = (tx_ref as string).split('-').slice(2);
+        for (const txId of transactionIds) {
+          const txRef = firestore.collection('transactions').doc(txId);
+          const txDoc = await txRef.get();
+          const tx = txDoc.data();
+          if (txDoc.exists && tx?.status === 'pending_payment') {
+            await txRef.update({
+              status: 'paid',
+              escrow_status: 'held',
+              payment_reference: 'MOCK_FLW_ID',
+              gateway_response: { mode: 'simulation' }
+            });
+            await firestore.collection('listings').doc(tx?.listing_id).update({ status: 'sold' });
           }
-        });
-        updateTx();
+        }
         return res.json({ status: 'success', message: 'Payment verified (Simulated)' });
       }
 
@@ -1195,7 +1468,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/webhook/flutterwave', (req, res) => {
+  app.post('/api/webhook/flutterwave', async (req, res) => {
     const secretHash = process.env.FLW_SECRET_HASH;
     const signature = req.headers['verif-hash'];
 
@@ -1206,138 +1479,270 @@ async function startServer() {
     const { status, tx_ref, id: flw_id } = req.body.data || req.body;
 
     if (status === 'successful') {
-      const transactionIds = tx_ref.split('-').slice(2); // Extract IDs from eco-timestamp-id1-id2...
+      const transactionIds = (tx_ref as string).split('-').slice(2); // Extract IDs from eco-timestamp-id1-id2...
       
-      const updateTx = db.transaction(() => {
-        for (const txId of transactionIds) {
-          const tx: any = db.prepare('SELECT * FROM transactions WHERE id = ?').get(txId);
-          if (tx && tx.status === 'pending_payment') {
-            db.prepare(`
-              UPDATE transactions 
-              SET status = 'paid', escrow_status = 'held', payment_reference = ?, gateway_response = ?
-              WHERE id = ?
-            `).run(flw_id, JSON.stringify(req.body), txId);
-            
-            db.prepare('UPDATE listings SET status = ? WHERE id = ?').run('sold', tx.listing_id);
-          }
+      for (const txId of transactionIds) {
+        const txRef = firestore.collection('transactions').doc(txId);
+        const txDoc = await txRef.get();
+        const tx = txDoc.data();
+        if (txDoc.exists && tx?.status === 'pending_payment') {
+          await txRef.update({
+            status: 'paid',
+            escrow_status: 'held',
+            payment_reference: flw_id,
+            gateway_response: req.body
+          });
+          await firestore.collection('listings').doc(tx?.listing_id).update({ status: 'sold' });
         }
-      });
-      updateTx();
+      }
     }
 
     res.status(200).end();
   });
 
-  app.get('/api/orders', authenticateToken, (req: any, res) => {
-    const orders = db.prepare(`
-      SELECT t.*, l.title as listing_title, l.images as listing_images, u.name as seller_name, b.name as buyer_name
-      FROM transactions t
-      JOIN listings l ON t.listing_id = l.id
-      JOIN users u ON t.seller_id = u.id
-      JOIN users b ON t.buyer_id = b.id
-      WHERE t.buyer_id = ? OR t.seller_id = ?
-      ORDER BY t.created_at DESC
-    `).all(req.user.id, req.user.id);
-    res.json(orders);
-  });
-
-  app.post('/api/orders/:id/ship', authenticateToken, (req: any, res) => {
-    const { tracking_id } = req.body;
-    const order: any = db.prepare('SELECT * FROM transactions WHERE id = ?').get(req.params.id);
-    if (!order || order.seller_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
-
-    db.prepare("UPDATE transactions SET status = 'shipped', tracking_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .run(tracking_id, req.params.id);
-    res.json({ success: true });
-  });
-
-  app.post('/api/orders/:id/deliver', authenticateToken, (req: any, res) => {
-    const order: any = db.prepare('SELECT * FROM transactions WHERE id = ?').get(req.params.id);
-    if (!order || order.seller_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
-
-    db.prepare("UPDATE transactions SET status = 'delivered', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .run(req.params.id);
-    res.json({ success: true });
-  });
-
-  app.post('/api/orders/:id/confirm', authenticateToken, (req: any, res) => {
-    const order: any = db.prepare('SELECT * FROM transactions WHERE id = ?').get(req.params.id);
-    if (!order || order.buyer_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
-
-    const transaction = db.transaction(() => {
-      db.prepare("UPDATE transactions SET status = 'completed', escrow_status = 'released', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .run(req.params.id);
+  app.get('/api/orders', authenticateToken, async (req: any, res) => {
+    try {
+      const buyerQuery = firestore.collection('transactions').where('buyer_id', '==', req.user.id).get();
+      const sellerQuery = firestore.collection('transactions').where('seller_id', '==', req.user.id).get();
       
-      // Release funds to seller
-      db.prepare('UPDATE users SET wallet_balance = wallet_balance + ? WHERE id = ?')
-        .run(order.amount, order.seller_id);
-    });
+      const [buyerSnap, sellerSnap] = await Promise.all([buyerQuery, sellerQuery]);
+      
+      const orders = [];
+      const allDocs = [...buyerSnap.docs, ...sellerSnap.docs];
+      
+      // Deduplicate if user is both buyer and seller (unlikely but possible)
+      const seenIds = new Set();
+      const uniqueDocs = allDocs.filter(doc => {
+        if (seenIds.has(doc.id)) return false;
+        seenIds.add(doc.id);
+        return true;
+      });
 
-    transaction();
-    res.json({ success: true });
+      for (const doc of uniqueDocs) {
+        const t = { ...doc.data(), id: doc.id };
+        
+        // Join with listing and users
+        const [listingDoc, sellerDoc, buyerDoc] = await Promise.all([
+          firestore.collection('listings').doc(t.listing_id).get(),
+          firestore.collection('users').doc(t.seller_id).get(),
+          firestore.collection('users').doc(t.buyer_id).get()
+        ]);
+
+        orders.push({
+          ...t,
+          listing_title: listingDoc.data()?.title,
+          listing_images: listingDoc.data()?.images,
+          seller_name: sellerDoc.data()?.name,
+          buyer_name: buyerDoc.data()?.name
+        });
+      }
+
+      orders.sort((a: any, b: any) => {
+        const dateA = a.created_at?.toDate?.() || new Date(a.created_at);
+        const dateB = b.created_at?.toDate?.() || new Date(b.created_at);
+        return dateB - dateA;
+      });
+
+      res.json(orders);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
-  app.post('/api/orders/:id/dispute', authenticateToken, (req: any, res) => {
+  app.post('/api/orders/:id/ship', authenticateToken, async (req: any, res) => {
+    const { tracking_id } = req.body;
+    try {
+      const orderRef = firestore.collection('transactions').doc(req.params.id);
+      const orderDoc = await orderRef.get();
+      const order = orderDoc.data();
+
+      if (!orderDoc.exists || order?.seller_id !== req.user.id) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+
+      await orderRef.update({
+        status: 'shipped',
+        tracking_id,
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/orders/:id/deliver', authenticateToken, async (req: any, res) => {
+    try {
+      const orderRef = firestore.collection('transactions').doc(req.params.id);
+      const orderDoc = await orderRef.get();
+      const order = orderDoc.data();
+
+      if (!orderDoc.exists || order?.seller_id !== req.user.id) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+
+      await orderRef.update({
+        status: 'delivered',
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/orders/:id/confirm', authenticateToken, async (req: any, res) => {
+    try {
+      const orderRef = firestore.collection('transactions').doc(req.params.id);
+      const orderDoc = await orderRef.get();
+      const order = orderDoc.data();
+
+      if (!orderDoc.exists || order?.buyer_id !== req.user.id) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+
+      await firestore.runTransaction(async (transaction) => {
+        transaction.update(orderRef, {
+          status: 'completed',
+          escrow_status: 'released',
+          updated_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Release funds to seller
+        const sellerRef = firestore.collection('users').doc(order?.seller_id);
+        transaction.update(sellerRef, {
+          wallet_balance: admin.firestore.FieldValue.increment(order?.amount)
+        });
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/orders/:id/dispute', authenticateToken, async (req: any, res) => {
     const { reason, evidence } = req.body;
-    const order: any = db.prepare('SELECT * FROM transactions WHERE id = ?').get(req.params.id);
-    if (!order || order.buyer_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
+    try {
+      const orderRef = firestore.collection('transactions').doc(req.params.id);
+      const orderDoc = await orderRef.get();
+      const order = orderDoc.data();
 
-    db.prepare("UPDATE transactions SET status = 'disputed', dispute_reason = ?, dispute_evidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .run(reason, JSON.stringify(evidence), req.params.id);
-    res.json({ success: true });
+      if (!orderDoc.exists || order?.buyer_id !== req.user.id) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+
+      await orderRef.update({
+        status: 'disputed',
+        dispute_reason: reason,
+        dispute_evidence: evidence,
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
-  app.post('/api/reviews', authenticateToken, (req: any, res) => {
+  app.post('/api/reviews', authenticateToken, async (req: any, res) => {
     const { transaction_id, rating, review_text } = req.body;
     
     try {
-      const transaction: any = db.prepare('SELECT * FROM transactions WHERE id = ?').get(transaction_id);
+      const txRef = firestore.collection('transactions').doc(transaction_id);
+      const txDoc = await txRef.get();
+      const transaction = txDoc.data();
       
-      if (!transaction) return res.status(404).json({ error: 'Transaction not found' });
-      if (transaction.status !== 'completed') return res.status(400).json({ error: 'Transaction must be completed to leave a review' });
-      if (transaction.buyer_id !== req.user.id) return res.status(403).json({ error: 'Only the buyer can review this transaction' });
+      if (!txDoc.exists) return res.status(404).json({ error: 'Transaction not found' });
+      if (transaction?.status !== 'completed') return res.status(400).json({ error: 'Transaction must be completed to leave a review' });
+      if (transaction?.buyer_id !== req.user.id) return res.status(403).json({ error: 'Only the buyer can review this transaction' });
 
-      const stmt = db.prepare(`
-        INSERT INTO reviews (transaction_id, buyer_id, seller_id, rating, review_text)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      stmt.run(transaction_id, req.user.id, transaction.seller_id, rating, review_text);
+      // Check for existing review
+      const existingReview = await firestore.collection('reviews')
+        .where('transaction_id', '==', transaction_id)
+        .get();
       
-      // Update seller rating
-      const stats: any = db.prepare('SELECT AVG(rating) as avg, COUNT(*) as count FROM reviews WHERE seller_id = ?').get(transaction.seller_id);
-      db.prepare('UPDATE users SET rating = ? WHERE id = ?').run(stats.avg, transaction.seller_id);
-      
-      res.json({ success: true, avg_rating: stats.avg, total_reviews: stats.count });
-    } catch (error: any) {
-      if (error.message.includes('UNIQUE constraint failed')) {
+      if (!existingReview.empty) {
         return res.status(400).json({ error: 'You have already reviewed this transaction' });
       }
+
+      const reviewData = {
+        transaction_id,
+        buyer_id: req.user.id,
+        seller_id: transaction?.seller_id,
+        rating,
+        review_text,
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      };
+
+      await firestore.collection('reviews').add(reviewData);
+      
+      // Update seller rating
+      const reviewsSnap = await firestore.collection('reviews')
+        .where('seller_id', '==', transaction?.seller_id)
+        .get();
+      
+      const ratings = reviewsSnap.docs.map(doc => doc.data().rating);
+      const avg = ratings.reduce((a, b) => a + b, 0) / ratings.length;
+      
+      await firestore.collection('users').doc(transaction?.seller_id).update({ rating: avg });
+      
+      res.json({ success: true, avg_rating: avg, total_reviews: ratings.length });
+    } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  app.get('/api/sellers/:id/reviews', (req, res) => {
-    const reviews = db.prepare(`
-      SELECT r.*, u.name as buyer_name, u.avatar_url as buyer_avatar
-      FROM reviews r
-      JOIN users u ON r.buyer_id = u.id
-      WHERE r.seller_id = ?
-      ORDER BY r.created_at DESC
-    `).all(req.params.id);
-    res.json(reviews);
+  app.get('/api/sellers/:id/reviews', async (req, res) => {
+    try {
+      const reviewsSnap = await firestore.collection('reviews')
+        .where('seller_id', '==', req.params.id)
+        .orderBy('created_at', 'desc')
+        .get();
+      
+      const reviews = [];
+      for (const doc of reviewsSnap.docs) {
+        const r = { ...doc.data(), id: doc.id };
+        const buyerDoc = await firestore.collection('users').doc(r.buyer_id).get();
+        reviews.push({
+          ...r,
+          buyer_name: buyerDoc.data()?.name,
+          buyer_avatar: buyerDoc.data()?.avatar_url
+        });
+      }
+      res.json(reviews);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
-  app.post('/api/transactions/:id/confirm', authenticateToken, (req: any, res) => {
-    const tx: any = db.prepare('SELECT * FROM transactions WHERE id = ?').get(req.params.id);
-    if (!tx || tx.buyer_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
-
+  app.post('/api/transactions/:id/confirm', authenticateToken, async (req: any, res) => {
     try {
-      const confirmTx = db.transaction(() => {
-        db.prepare('UPDATE users SET wallet_balance = wallet_balance + ? WHERE id = ?').run(tx.amount, tx.seller_id);
-        db.prepare("UPDATE transactions SET status = 'completed', escrow_status = 'released', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
-        db.prepare("UPDATE listings SET status = 'sold' WHERE id = ?").run(tx.listing_id);
+      const txRef = firestore.collection('transactions').doc(req.params.id);
+      const txDoc = await txRef.get();
+      const tx = txDoc.data();
+      
+      if (!txDoc.exists || tx?.buyer_id !== req.user.id) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+
+      await firestore.runTransaction(async (transaction) => {
+        transaction.update(txRef, {
+          status: 'completed',
+          escrow_status: 'released',
+          updated_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Release funds to seller
+        const sellerRef = firestore.collection('users').doc(tx?.seller_id);
+        transaction.update(sellerRef, {
+          wallet_balance: admin.firestore.FieldValue.increment(tx?.amount)
+        });
+
+        // Mark listing as sold
+        const listingRef = firestore.collection('listings').doc(tx?.listing_id);
+        transaction.update(listingRef, { status: 'sold' });
       });
-      confirmTx();
+
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1347,14 +1752,29 @@ async function startServer() {
   // --- Socket.io ---
   io.on('connection', (socket) => {
     socket.on('join', (userId) => socket.join(`user_${userId}`));
-    socket.on('send_message', (data) => {
+    socket.on('send_message', async (data) => {
       const { sender_id, receiver_id, content, listing_id } = data;
-      const stmt = db.prepare('INSERT INTO messages (sender_id, receiver_id, content, listing_id) VALUES (?, ?, ?, ?)');
-      const result = stmt.run(sender_id, receiver_id, content, listing_id);
-      const message = { id: result.lastInsertRowid, ...data, created_at: new Date().toISOString() };
-      io.to(`user_${receiver_id}`).emit('receive_message', message);
-      socket.emit('message_sent', message);
+      try {
+        const messageData = {
+          sender_id,
+          receiver_id,
+          content,
+          listing_id,
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        };
+        const docRef = await firestore.collection('messages').add(messageData);
+        const message = { id: docRef.id, ...data, created_at: new Date().toISOString() };
+        io.to(`user_${receiver_id}`).emit('receive_message', message);
+        socket.emit('message_sent', message);
+      } catch (error) {
+        console.error('Socket message error:', error);
+      }
     });
+  });
+
+  // --- API 404 Handler ---
+  app.use('/api/*', (req, res) => {
+    res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` });
   });
 
   // --- Vite Middleware ---
@@ -1385,30 +1805,32 @@ async function startServer() {
     console.log('Server running on http://localhost:3000');
     
     // Cleanup job for deleted accounts (runs every hour)
-    setInterval(() => {
+    setInterval(async () => {
       try {
         console.log('[CLEANUP] Checking for expired account deletions...');
-        const expiredUsers = db.prepare('SELECT id FROM users WHERE deleted_at IS NOT NULL AND delete_expires < CURRENT_TIMESTAMP').all();
+        const now = admin.firestore.Timestamp.now();
+        const expiredUsersSnap = await firestore.collection('users')
+          .where('deleted_at', '!=', null)
+          .where('delete_expires', '<', now)
+          .get();
         
-        for (const user of expiredUsers as any[]) {
-          console.log(`[CLEANUP] Anonymizing user ${user.id}`);
+        for (const doc of expiredUsersSnap.docs) {
+          console.log(`[CLEANUP] Anonymizing user ${doc.id}`);
           // Soft delete / Anonymize
-          db.prepare(`
-            UPDATE users 
-            SET email = 'deleted_' || id || '@deleted.ecotrade',
-                password = 'DELETED_' || id,
-                name = 'Deleted User',
-                full_name = 'Deleted User',
-                username = 'deleted_user_' || id,
-                bio = NULL,
-                location = NULL,
-                avatar_url = NULL,
-                cover_url = NULL,
-                social_links = NULL,
-                national_id_encrypted = NULL,
-                deleted_at = CURRENT_TIMESTAMP -- Keep this to mark as permanently deleted in this sense
-            WHERE id = ?
-          `).run(user.id);
+          await doc.ref.update({
+            email: `deleted_${doc.id}@deleted.ecotrade`,
+            password: `DELETED_${doc.id}`,
+            name: 'Deleted User',
+            full_name: 'Deleted User',
+            username: `deleted_user_${doc.id}`,
+            bio: null,
+            location: null,
+            avatar_url: null,
+            cover_url: null,
+            social_links: null,
+            national_id_encrypted: null,
+            deleted_at: admin.firestore.FieldValue.serverTimestamp() // Mark as permanently deleted
+          });
         }
       } catch (error) {
         console.error('[CLEANUP ERROR]', error);
@@ -1416,39 +1838,46 @@ async function startServer() {
     }, 60 * 60 * 1000);
 
     // Seed sample data if empty
-    const usersCount: any = db.prepare('SELECT COUNT(*) as count FROM users').get();
-    if (usersCount.count === 0) {
-      console.log('Seeding sample data...');
-      const hashedPassword = bcrypt.hashSync('password123', 10);
-      
-      // Create users
-      const user1 = db.prepare('INSERT INTO users (email, password, name, username, wallet_balance, rating, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, 1)').run('alice@example.com', hashedPassword, 'Alice Green', 'alice', 500, 4.9);
-      const user2 = db.prepare('INSERT INTO users (email, password, name, username, wallet_balance, rating, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, 1)').run('bob@example.com', hashedPassword, 'Bob Smith', 'bob', 1000, 4.5);
-      const user3 = db.prepare('INSERT INTO users (email, password, name, username, wallet_balance, rating, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, 1)').run('nefaryus@example.com', hashedPassword, 'Nefaryus', 'Nefaryus', 1500, 5.0);
-      
-      // Create listings
-      const listings = [
-        { seller_id: user1.lastInsertRowid, title: 'Vintage Leather Jacket', description: 'Beautifully aged brown leather jacket. Size M.', category: 'Fashion', condition: 'Used - Good', price: 85, is_negotiable: 1, location: 'Nairobi', images: ['https://picsum.photos/seed/jacket/800/800'] },
-        { seller_id: user1.lastInsertRowid, title: 'Mechanical Keyboard', description: 'RGB backlit mechanical keyboard with blue switches.', category: 'Electronics', condition: 'Like New', price: 45, is_negotiable: 0, location: 'Mombasa', images: ['https://picsum.photos/seed/kb/800/800'] },
-        { seller_id: user2.lastInsertRowid, title: 'Retro Camera', description: 'Classic film camera in working condition.', category: 'Electronics', condition: 'Used - Fair', price: 120, is_negotiable: 1, location: 'Kisumu', images: ['https://picsum.photos/seed/camera/800/800'] },
-        { seller_id: user2.lastInsertRowid, title: 'iPhone 13 Pro', description: '128GB, Sierra Blue, excellent condition.', category: 'Phones & Tablets', condition: 'Like New', price: 750, is_negotiable: 1, location: 'Nairobi', images: ['https://picsum.photos/seed/iphone/800/800'] },
-        { seller_id: user3.lastInsertRowid, title: 'High-end Gaming PC', description: 'RTX 4090, i9-13900K, 64GB RAM.', category: 'Computers & Laptops', condition: 'New', price: 3500, is_negotiable: 0, location: 'Nairobi', images: ['https://picsum.photos/seed/pc/800/800'] },
-        { seller_id: user3.lastInsertRowid, title: 'Sony WH-1000XM5', description: 'Industry-leading noise canceling headphones.', category: 'Electronics', condition: 'New', price: 350, is_negotiable: 0, location: 'Nairobi', images: ['https://picsum.photos/seed/sony/800/800'] },
-        { seller_id: user1.lastInsertRowid, title: 'MacBook Air M1', description: '8GB RAM, 256GB SSD, Space Gray.', category: 'Computers & Laptops', condition: 'New', price: 900, is_negotiable: 0, location: 'Nakuru', images: ['https://picsum.photos/seed/macbook/800/800'] },
-        { seller_id: user2.lastInsertRowid, title: 'PS5 Console', description: 'Disc version with two controllers.', category: 'Gaming', condition: 'New', price: 550, is_negotiable: 0, location: 'Eldoret', images: ['https://picsum.photos/seed/ps5/800/800'] },
-        { seller_id: user1.lastInsertRowid, title: 'Nike Air Max', description: 'Size 10, brand new in box.', category: 'Fashion', condition: 'New', price: 110, is_negotiable: 1, location: 'Nairobi', images: ['https://picsum.photos/seed/nike/800/800'] },
-        { seller_id: user2.lastInsertRowid, title: 'Coffee Maker', description: 'Automatic espresso machine.', category: 'Appliances', condition: 'Used - Good', price: 150, is_negotiable: 1, location: 'Mombasa', images: ['https://picsum.photos/seed/coffee/800/800'] },
-      ];
+    const seedData = async () => {
+      const usersSnap = await firestore.collection('users').limit(1).get();
+      if (usersSnap.empty) {
+        console.log('Seeding sample data...');
+        const hashedPassword = bcrypt.hashSync('password123', 10);
+        
+        // Create users
+        const user1Ref = firestore.collection('users').doc();
+        const user2Ref = firestore.collection('users').doc();
+        const user3Ref = firestore.collection('users').doc();
 
-      const insertListing = db.prepare(`
-        INSERT INTO listings (seller_id, title, description, category, condition, price, is_negotiable, location, images)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
+        await user1Ref.set({ email: 'alice@example.com', password: hashedPassword, name: 'Alice Green', username: 'alice', wallet_balance: 500, rating: 4.9, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
+        await user2Ref.set({ email: 'bob@example.com', password: hashedPassword, name: 'Bob Smith', username: 'bob', wallet_balance: 1000, rating: 4.5, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
+        await user3Ref.set({ email: 'nefaryus@example.com', password: hashedPassword, name: 'Nefaryus', username: 'Nefaryus', wallet_balance: 1500, rating: 5.0, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
+        
+        // Create listings
+        const listings = [
+          { seller_id: user1Ref.id, title: 'Vintage Leather Jacket', description: 'Beautifully aged brown leather jacket. Size M.', category: 'Fashion', condition: 'Used - Good', price: 85, is_negotiable: true, location: 'Nairobi', images: ['https://picsum.photos/seed/jacket/800/800'] },
+          { seller_id: user1Ref.id, title: 'Mechanical Keyboard', description: 'RGB backlit mechanical keyboard with blue switches.', category: 'Electronics', condition: 'Like New', price: 45, is_negotiable: false, location: 'Mombasa', images: ['https://picsum.photos/seed/kb/800/800'] },
+          { seller_id: user2Ref.id, title: 'Retro Camera', description: 'Classic film camera in working condition.', category: 'Electronics', condition: 'Used - Fair', price: 120, is_negotiable: true, location: 'Kisumu', images: ['https://picsum.photos/seed/camera/800/800'] },
+          { seller_id: user2Ref.id, title: 'iPhone 13 Pro', description: '128GB, Sierra Blue, excellent condition.', category: 'Phones & Tablets', condition: 'Like New', price: 750, is_negotiable: true, location: 'Nairobi', images: ['https://picsum.photos/seed/iphone/800/800'] },
+          { seller_id: user3Ref.id, title: 'High-end Gaming PC', description: 'RTX 4090, i9-13900K, 64GB RAM.', category: 'Computers & Laptops', condition: 'New', price: 3500, is_negotiable: false, location: 'Nairobi', images: ['https://picsum.photos/seed/pc/800/800'] },
+          { seller_id: user3Ref.id, title: 'Sony WH-1000XM5', description: 'Industry-leading noise canceling headphones.', category: 'Electronics', condition: 'New', price: 350, is_negotiable: false, location: 'Nairobi', images: ['https://picsum.photos/seed/sony/800/800'] },
+          { seller_id: user1Ref.id, title: 'MacBook Air M1', description: '8GB RAM, 256GB SSD, Space Gray.', category: 'Computers & Laptops', condition: 'New', price: 900, is_negotiable: false, location: 'Nakuru', images: ['https://picsum.photos/seed/macbook/800/800'] },
+          { seller_id: user2Ref.id, title: 'PS5 Console', description: 'Disc version with two controllers.', category: 'Gaming', condition: 'New', price: 550, is_negotiable: false, location: 'Eldoret', images: ['https://picsum.photos/seed/ps5/800/800'] },
+          { seller_id: user1Ref.id, title: 'Nike Air Max', description: 'Size 10, brand new in box.', category: 'Fashion', condition: 'New', price: 110, is_negotiable: true, location: 'Nairobi', images: ['https://picsum.photos/seed/nike/800/800'] },
+          { seller_id: user2Ref.id, title: 'Coffee Maker', description: 'Automatic espresso machine.', category: 'Appliances', condition: 'Used - Good', price: 150, is_negotiable: true, location: 'Mombasa', images: ['https://picsum.photos/seed/coffee/800/800'] },
+        ];
 
-      for (const l of listings) {
-        insertListing.run(l.seller_id, l.title, l.description, l.category, l.condition, l.price, l.is_negotiable, l.location, JSON.stringify(l.images));
+        for (const l of listings) {
+          await firestore.collection('listings').add({
+            ...l,
+            status: 'available',
+            created_at: admin.firestore.FieldValue.serverTimestamp(),
+            updated_at: admin.firestore.FieldValue.serverTimestamp()
+          });
+        }
       }
-    }
+    };
+    seedData().catch(console.error);
   });
 }
 

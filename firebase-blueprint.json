@@ -1,0 +1,138 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "name": { "type": "string" },
+        "full_name": { "type": "string" },
+        "username": { "type": "string" },
+        "role": { "type": "string", "enum": ["buyer", "seller", "admin"] },
+        "bio": { "type": "string" },
+        "location": { "type": "string" },
+        "avatar_url": { "type": "string" },
+        "wallet_balance": { "type": "number" },
+        "rating": { "type": "number" },
+        "is_verified": { "type": "boolean" },
+        "is_email_verified": { "type": "boolean" },
+        "is_seller_verified": { "type": "boolean" },
+        "phone": { "type": "string" },
+        "social_links": { "type": "object" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "name"]
+    },
+    "Listing": {
+      "title": "Listing",
+      "description": "Product listing for sale",
+      "type": "object",
+      "properties": {
+        "seller_id": { "type": "string", "description": "UID of the seller" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "condition": { "type": "string" },
+        "price": { "type": "number" },
+        "is_negotiable": { "type": "boolean" },
+        "location": { "type": "string" },
+        "status": { "type": "string", "enum": ["available", "sold", "delisted"] },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["seller_id", "title", "price", "category"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Record of a purchase",
+      "type": "object",
+      "properties": {
+        "listing_id": { "type": "string" },
+        "buyer_id": { "type": "string" },
+        "seller_id": { "type": "string" },
+        "amount": { "type": "number" },
+        "shipping_fee": { "type": "number" },
+        "total_amount": { "type": "number" },
+        "status": { "type": "string" },
+        "escrow_status": { "type": "string" },
+        "payment_method": { "type": "string" },
+        "payment_reference": { "type": "string" },
+        "shipping_address": { "type": "string" },
+        "tracking_id": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["listing_id", "buyer_id", "seller_id", "total_amount"]
+    },
+    "Offer": {
+      "title": "Offer",
+      "description": "Negotiation offer for a listing",
+      "type": "object",
+      "properties": {
+        "listing_id": { "type": "string" },
+        "buyer_id": { "type": "string" },
+        "seller_id": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["listing_id", "buyer_id", "seller_id", "amount"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Chat message between users",
+      "type": "object",
+      "properties": {
+        "sender_id": { "type": "string" },
+        "receiver_id": { "type": "string" },
+        "listing_id": { "type": "string" },
+        "content": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sender_id", "receiver_id", "content"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "User review after a transaction",
+      "type": "object",
+      "properties": {
+        "transaction_id": { "type": "string" },
+        "buyer_id": { "type": "string" },
+        "seller_id": { "type": "string" },
+        "rating": { "type": "integer" },
+        "review_text": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["transaction_id", "buyer_id", "seller_id", "rating"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/listings/{listingId}": {
+      "schema": "Listing",
+      "description": "Marketplace listings"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Purchase records"
+    },
+    "/offers/{offerId}": {
+      "schema": "Offer",
+      "description": "Price negotiations"
+    },
+    "/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Direct messages"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Transaction reviews"
+    }
+  }
+}

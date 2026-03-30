@@ -68,12 +68,22 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
     setResendSuccess('');
     setError('');
     try {
-      await sendEmailVerification(user);
+      const actionCodeSettings = {
+        url: `${window.location.origin}/verify-email`,
+        handleCodeInApp: true,
+      };
+      await sendEmailVerification(user, actionCodeSettings);
       setResendSuccess('Verification email sent again! Please check your inbox.');
       setShowResend(false);
     } catch (err: any) {
       console.error('Resend verification error:', err);
-      setError(err.message || 'Failed to resend verification email.');
+      if (err.code === 'auth/too-many-requests') {
+        setError('Too many requests. Please wait a few minutes before trying again.');
+      } else if (err.code === 'auth/unauthorized-continue-uri') {
+        setError('This domain is not whitelisted in Firebase. Please add ' + window.location.origin + ' to Authorized Domains in Firebase Console (Authentication > Settings).');
+      } else {
+        setError(err.message || 'Failed to resend verification email.');
+      }
     } finally {
       setResending(false);
     }
@@ -129,7 +139,17 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
         },
         body: JSON.stringify({ captchaToken }),
       });
-      const data = await res.json();
+      
+      let data;
+      const contentType = res.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        console.error('Non-JSON response:', text);
+        throw new Error('Server returned an invalid response. Please try again later.');
+      }
+
       if (res.ok) {
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(data.user));
