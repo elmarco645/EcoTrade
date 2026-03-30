@@ -1,17 +1,16 @@
-import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
-import { createServer } from 'node:http';
+import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
 import bcrypt from 'bcryptjs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import axios from 'axios';
-import crypto from 'node:crypto';
+import crypto from 'crypto';
 import multer from 'multer';
-import fs from 'node:fs';
+import fs from 'fs';
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import admin from 'firebase-admin';
@@ -20,7 +19,9 @@ import { getFirestore } from 'firebase-admin/firestore';
 import firebaseConfig from '../firebase-applet-config.json' assert { type: 'json' };
 
 console.log('[SERVER] Initializing Firebase Admin...');
-if (admin) {
+if (!admin) {
+  console.error('[SERVER] Firebase Admin module not found');
+} else {
   try {
     const projectId = process.env.FIREBASE_PROJECT_ID || 
                       process.env.GOOGLE_CLOUD_PROJECT || 
@@ -82,13 +83,6 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
 
-// Detect input type (email, phone, or username)
-function detectInputType(input: string) {
-  if (input.includes("@")) return "email";
-  if (/^\+?\d{10,15}$/.test(input)) return "phone";
-  return "username";
-}
-
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -148,33 +142,6 @@ const sendDeleteUndoEmail = async (email: string, token: string, origin: string)
     console.log(`Delete undo email sent to ${email}`);
   } catch (error) {
     console.error('Error sending delete undo email:', error);
-  }
-};
-
-const sendEmailChangeVerificationEmail = async (email: string, token: string, origin: string) => {
-  if (!EMAIL_USER || !EMAIL_PASS) {
-    console.warn('Email credentials missing. Email change simulation only.');
-    console.log(`[EMAIL SIMULATION] Verify new email for ${email}: ${origin}/api/user/confirm-email-change?token=${token}`);
-    return;
-  }
-
-  const link = `${origin}/api/user/confirm-email-change?token=${token}`;
-
-  try {
-    await transporter.sendMail({
-      from: `"EcoTrade" <${EMAIL_USER}>`,
-      to: email,
-      subject: 'Verify Your New Email Address',
-      html: emailTemplate(
-        "Verify Your New Email Address",
-        "You requested to change your email address for EcoTrade. Please click the button below to verify this new email address.",
-        "Verify Email",
-        link
-      )
-    });
-    console.log(`Verification email sent to ${email}`);
-  } catch (error) {
-    console.error('Error sending verification email:', error);
   }
 };
 
@@ -325,7 +292,7 @@ async function startServer() {
   app.post('/api/auth/register', async (req, res) => {
     const { email, name, username, phone, avatar, captchaToken } = req.body;
     const authHeader = req.headers['authorization'];
-    const firebaseToken = authHeader?.split(' ')[1];
+    const firebaseToken = authHeader && authHeader.split(' ')[1];
 
     try {
       // Verify CAPTCHA
@@ -400,10 +367,16 @@ async function startServer() {
     }
   });
 
+  function detectInputType(input: string) {
+    if (input.includes("@")) return "email";
+    if (/^\+?\d{10,15}$/.test(input)) return "phone";
+    return "username";
+  }
+
   app.post('/api/auth/login', async (req, res) => {
     const { captchaToken } = req.body;
     const authHeader = req.headers['authorization'];
-    const firebaseToken = authHeader?.split(' ')[1];
+    const firebaseToken = authHeader && authHeader.split(' ')[1];
 
     try {
       // Verify CAPTCHA
@@ -677,7 +650,7 @@ async function startServer() {
   // --- Middleware ---
   const authenticateToken = async (req: any, res: any, next: any) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader?.split(' ')[1];
+    const token = authHeader && authHeader.split(' ')[1];
     if (!token) return res.sendStatus(401);
 
     try {
@@ -1017,12 +990,13 @@ async function startServer() {
       console.log(`[API] Using Firestore project: ${admin.app().options.projectId}`);
       console.log(`[API] Using Firestore database: ${databaseId}`);
       const listingsSnapshot = await firestore.collection('listings')
+        .where('status', '!=', 'sold')
+        .orderBy('status')
         .orderBy('created_at', 'desc')
         .get();
       
       const listings = await Promise.all(listingsSnapshot.docs.map(async (doc) => {
         const data = doc.data();
-        if (data.status === 'sold') return null;
         const sellerDoc = await firestore.collection('users').doc(data.seller_id).get();
         const sellerData = sellerDoc.data();
         return {
@@ -1032,7 +1006,7 @@ async function startServer() {
           seller_avatar: sellerData?.avatar_url || sellerData?.avatar,
           is_seller_verified: sellerData?.is_seller_verified
         };
-      })).then(results => results.filter(Boolean));
+      }));
 
       console.log(`[API] Found ${listings.length} listings`);
       res.json(listings);
@@ -1083,7 +1057,7 @@ async function startServer() {
       for (const id of ids) {
         const listingDoc = await firestore.collection('listings').doc(id).get();
         if (listingDoc.exists) {
-          const listing = { ...listingDoc.data(), id: listingDoc.id } as any;
+          const listing = { ...listingDoc.data(), id: listingDoc.id };
           if (listing.status === 'reserved') {
             // Check for pending transactions
             const pendingTxQuery = await firestore.collection('transactions')
@@ -1194,7 +1168,7 @@ async function startServer() {
         };
       }));
 
-      res.json(offers.sort((a: any, b: any) => b.created_at.toDate() - a.created_at.toDate()));
+      res.json(offers.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1261,7 +1235,7 @@ async function startServer() {
         };
       }));
 
-      res.json(transactions.sort((a: any, b: any) => b.created_at.toDate() - a.created_at.toDate()));
+      res.json(transactions.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1334,15 +1308,15 @@ async function startServer() {
   app.post('/api/transactions/checkout', authenticateToken, async (req: any, res) => {
     const { items, total, shipping_address } = req.body;
     try {
-      const availableItems: any[] = [];
-      const unavailableItems: any[] = [];
+      const availableItems = [];
+      const unavailableItems = [];
 
       for (const listing_id of items) {
         const listingRef = firestore.collection('listings').doc(listing_id);
         const listingDoc = await listingRef.get();
         
         if (listingDoc.exists) {
-          const listing = { ...listingDoc.data(), id: listingDoc.id } as any;
+          const listing = { ...listingDoc.data(), id: listingDoc.id };
           if (listing.status === 'reserved') {
             const pendingTxQuery = await firestore.collection('transactions')
               .where('listing_id', '==', listing_id)
@@ -1384,7 +1358,7 @@ async function startServer() {
       const shipping_fee_per_item = (total - subtotal) / availableItems.length;
 
       const transactionIds = await firestore.runTransaction(async (transaction) => {
-        const ids: string[] = [];
+        const ids = [];
         for (const listing of availableItems) {
           const newTxRef = firestore.collection('transactions').doc();
           transaction.set(newTxRef, {
@@ -1563,7 +1537,7 @@ async function startServer() {
       });
 
       for (const doc of uniqueDocs) {
-        const t = { ...doc.data(), id: doc.id } as any;
+        const t = { ...doc.data(), id: doc.id };
         
         // Join with listing and users
         const [listingDoc, sellerDoc, buyerDoc] = await Promise.all([
@@ -1743,9 +1717,9 @@ async function startServer() {
         .orderBy('created_at', 'desc')
         .get();
       
-      const reviews: any[] = [];
+      const reviews = [];
       for (const doc of reviewsSnap.docs) {
-        const r = { ...doc.data(), id: doc.id } as any;
+        const r = { ...doc.data(), id: doc.id };
         const buyerDoc = await firestore.collection('users').doc(r.buyer_id).get();
         reviews.push({
           ...r,
