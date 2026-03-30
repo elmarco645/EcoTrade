@@ -6,3 +6,4 @@ coverage/
 *.log
 .env*
 !.env.example
+ecotrade-94ab2-firebase-adminsdk-fbsvc-0261d983bb.json
