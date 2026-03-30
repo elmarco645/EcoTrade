@@ -1,36 +1,73 @@
 import { useState, useEffect } from 'react';
-import { Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Clock, CheckCircle2, ShieldCheck, Loader2 } from 'lucide-react';
+import { Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Clock, CheckCircle2, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export default function Wallet({ user }: { user: any }) {
   const [balance, setBalance] = useState(0);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [balanceRes, txRes] = await Promise.all([
-          fetch('/api/user/wallet', {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-          }),
-          // We'll need a route for this, but for now let's mock or just fetch transactions
-          fetch('/api/user/transactions', {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-          })
-        ]);
+        setError(null);
+        setLoading(true);
+
+        console.log('[WALLET] Fetching wallet data for user:', user?.uid);
+
+        // Fetch balance
+        const balanceRes = await fetch('/api/user/wallet', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+
+        if (!balanceRes.ok) {
+          throw new Error(`Wallet API failed: ${balanceRes.status} ${balanceRes.statusText}`);
+        }
+
         const balanceData = await balanceRes.json();
-        const txData = await txRes.json();
+        console.log('[WALLET] Balance data received:', balanceData);
+
+        if (!balanceData || typeof balanceData.balance !== 'number') {
+          throw new Error('Invalid balance data format');
+        }
+
         setBalance(balanceData.balance);
+
+        // Fetch transactions
+        const txRes = await fetch('/api/user/transactions', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+
+        if (!txRes.ok) {
+          throw new Error(`Transactions API failed: ${txRes.status} ${txRes.statusText}`);
+        }
+
+        const txData = await txRes.json();
+        console.log('[WALLET] Transactions data received:', txData);
+
+        if (!Array.isArray(txData)) {
+          throw new Error('Invalid transactions data format');
+        }
+
         setTransactions(txData);
-      } catch (err) {
-        console.error(err);
+      } catch (err: any) {
+        console.error('[WALLET] Error fetching data:', err);
+        setError(err.message || 'Failed to load wallet data');
+        setBalance(0);
+        setTransactions([]);
       } finally {
         setLoading(false);
       }
     };
-    fetchData();
-  }, []);
+
+    if (user?.uid) {
+      fetchData();
+    } else {
+      setError('User not authenticated');
+      setLoading(false);
+    }
+  }, [user?.uid]);
 
   const handleConfirm = async (txId: number) => {
     try {
@@ -41,13 +78,42 @@ export default function Wallet({ user }: { user: any }) {
       if (res.ok) {
         // Refresh data
         window.location.reload();
+      } else {
+        alert('Failed to confirm transaction');
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('[WALLET] Confirm error:', err);
+      alert('Error confirming transaction');
     }
   };
 
-  if (loading) return <div className="flex h-96 items-center justify-center"><Loader2 className="h-10 w-10 animate-spin text-blue-600" /></div>;
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-4xl">
+        <div className="rounded-3xl bg-red-50 p-8 border border-red-200 flex gap-4">
+          <AlertCircle className="h-6 w-6 text-red-600 shrink-0 mt-1" />
+          <div>
+            <h3 className="font-bold text-red-900">Error Loading Wallet</h3>
+            <p className="text-sm text-red-700 mt-2">{error}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 transition-all"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-10">
@@ -86,9 +152,9 @@ export default function Wallet({ user }: { user: any }) {
               <div key={tx.id} className="flex items-center justify-between rounded-3xl bg-white p-6 shadow-sm border border-slate-100">
                 <div className="flex items-center gap-4">
                   <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${
-                    tx.buyer_id === user.id ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'
+                    tx.buyer_id === user.uid ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'
                   }`}>
-                    {tx.buyer_id === user.id ? <ArrowUpRight /> : <ArrowDownLeft />}
+                    {tx.buyer_id === user.uid ? <ArrowUpRight /> : <ArrowDownLeft />}
                   </div>
                   <div>
                     <p className="font-bold">{tx.listing_title || 'Marketplace Purchase'}</p>
@@ -106,11 +172,11 @@ export default function Wallet({ user }: { user: any }) {
                 </div>
                 <div className="text-right space-y-2">
                   <p className={`text-xl font-black ${
-                    tx.buyer_id === user.id ? 'text-slate-900' : 'text-emerald-600'
+                    tx.buyer_id === user.uid ? 'text-slate-900' : 'text-emerald-600'
                   }`}>
-                    {tx.buyer_id === user.id ? '-' : '+'}${tx.amount}
+                    {tx.buyer_id === user.uid ? '-' : '+'}${tx.amount}
                   </p>
-                  {tx.status === 'paid' && tx.buyer_id === user.id && (
+                  {tx.status === 'paid' && tx.buyer_id === user.uid && (
                     <button
                       onClick={() => handleConfirm(tx.id)}
                       className="flex items-center gap-1 rounded-full bg-emerald-600 px-4 py-1 text-xs font-bold text-white transition-all hover:bg-emerald-700"

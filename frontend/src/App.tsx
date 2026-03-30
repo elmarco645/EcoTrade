@@ -51,7 +51,7 @@ export default function App() {
     const handleError = (event: ErrorEvent) => {
       console.error('[GLOBAL ERROR]', event.error);
     };
-    window.addEventListener('error', handleError);
+    globalThis.addEventListener('error', handleError);
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log('[APP] Auth state changed:', firebaseUser ? 'User logged in' : 'No user');

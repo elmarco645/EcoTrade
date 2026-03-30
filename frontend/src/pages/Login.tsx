@@ -67,10 +67,13 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
       navigate('/');
     } catch (err: any) {
       console.error('Login error:', err);
+      console.log('Error code:', err.code);
+      console.log('Email:', email);
+      
       if (err.code === 'auth/operation-not-allowed') {
         setError('Login method is not enabled. Please contact support or check Firebase Console.');
-      } else if (err.code === 'auth/user-not-found') {
-        setError('Account not found');
+      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        setError('Email or password is incorrect');
       } else if (err.code === 'auth/wrong-password') {
         setError('Incorrect password');
       } else if (err.code === 'auth/invalid-email') {
