@@ -5,6 +5,8 @@
 
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth } from './firebase';
 import Navbar from './components/Navbar';
 import Breadcrumbs from './components/Breadcrumbs';
 import Home from './pages/Home';
@@ -27,46 +29,68 @@ import SearchResults from './pages/SearchResults';
 import PaymentSuccess from './pages/PaymentSuccess';
 import NotFound from './pages/NotFound';
 
+console.log('[APP] App.tsx module loaded');
+
 export default function App() {
+  console.log('[APP] Rendering App component');
   const [user, setUser] = useState<any>(null);
   const [cart, setCart] = useState<any[]>([]);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const savedUser = localStorage.getItem('user');
+    console.log('[APP] Initializing auth listener');
     
-    if (token && savedUser) {
-      // Set initial user from localStorage for immediate UI feedback
-      setUser(JSON.parse(savedUser));
-      
-      // Fetch latest profile data to sync state (e.g. verification status, balance)
-      fetch('/api/user/profile', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      .then(res => {
-        if (res.ok) return res.json();
-        throw new Error('Session expired');
-      })
-      .then(data => {
-        setUser(data);
-        localStorage.setItem('user', JSON.stringify(data));
-      })
-      .catch(() => {
-        handleLogout();
-      });
-    }
-    
+    // Global error handler
+    const handleError = (event: ErrorEvent) => {
+      console.error('[GLOBAL ERROR]', event.error);
+    };
+    window.addEventListener('error', handleError);
+
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      console.log('[APP] Auth state changed:', firebaseUser ? 'User logged in' : 'No user');
+      if (firebaseUser) {
+        const token = await firebaseUser.getIdToken();
+        localStorage.setItem('token', token);
+        
+        // Fetch latest profile data from our backend using Firebase token
+        fetch('/api/user/profile', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        .then(res => {
+          if (res.ok) return res.json();
+          throw new Error('Session expired');
+        })
+        .then(data => {
+          setUser(data);
+          localStorage.setItem('user', JSON.stringify(data));
+        })
+        .catch(() => {
+          handleLogout();
+        });
+      } else {
+        setUser(null);
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      }
+    });
+
     const savedCart = localStorage.getItem('cart');
     if (savedCart) {
       setCart(JSON.parse(savedCart));
     }
+
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
     localStorage.setItem('cart', JSON.stringify(cart));
   }, [cart]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('username');

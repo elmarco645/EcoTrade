@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Mail, Lock, User, AtSign, Loader2, Eye, EyeOff, Check, X, Phone, Image } from 'lucide-react';
 import ReCAPTCHA from 'react-google-recaptcha';
+import { createUserWithEmailAndPassword, sendEmailVerification } from 'firebase/auth';
+import { auth } from '../firebase';
 
 export default function Register({ setUser }: { setUser: (user: any) => void }) {
   const [name, setName] = useState('');
@@ -44,14 +46,28 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
     setShowLoginInstead(false);
 
     try {
+      // 1. Create user in Firebase Auth
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const firebaseUser = userCredential.user;
+
+      // 2. Send verification email
+      await sendEmailVerification(firebaseUser);
+
+      // 3. Get ID token to send to our backend
+      const token = await firebaseUser.getIdToken();
+
+      // 4. Create user in our local database
       const res = await fetch('/api/auth/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, username, email, phone, avatar, password, confirmPassword, captchaToken }),
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ name, username, email, phone, avatar, captchaToken }),
       });
       const data = await res.json();
       if (res.ok) {
-        setSuccess(data.message || 'Signup successful! Please check your email to verify your account.');
+        setSuccess('Signup successful! Please check your email to verify your account.');
         // Clear form
         setName('');
         setUsername('');
@@ -65,8 +81,14 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
           setShowLoginInstead(true);
         }
       }
-    } catch (err) {
-      setError('Something went wrong. Please try again.');
+    } catch (err: any) {
+      console.error('Registration error:', err);
+      if (err.code === 'auth/email-already-in-use') {
+        setError('This email is already registered. Please login instead.');
+        setShowLoginInstead(true);
+      } else {
+        setError(err.message || 'Something went wrong. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

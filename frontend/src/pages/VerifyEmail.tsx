@@ -1,39 +1,36 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { CheckCircle2, XCircle, Loader2, Mail } from 'lucide-react';
+import { applyActionCode } from 'firebase/auth';
+import { auth } from '../firebase';
 
 export default function VerifyEmail() {
   const [searchParams] = useSearchParams();
-  const token = searchParams.get('token');
+  const oobCode = searchParams.get('oobCode');
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    if (!token) {
+    if (!oobCode) {
       setStatus('error');
-      setMessage('Verification token is missing.');
+      setMessage('Verification code is missing.');
       return;
     }
 
     const verify = async () => {
       try {
-        const res = await fetch(`/api/auth/verify-email?token=${token}`);
-        const data = await res.json();
-        if (res.ok) {
-          setStatus('success');
-          setMessage(data.message);
-        } else {
-          setStatus('error');
-          setMessage(data.error);
-        }
-      } catch (err) {
+        await applyActionCode(auth, oobCode);
+        setStatus('success');
+        setMessage('Your email has been verified successfully!');
+      } catch (err: any) {
+        console.error('Verification error:', err);
         setStatus('error');
-        setMessage('Something went wrong. Please try again.');
+        setMessage(err.message || 'Something went wrong. Please try again.');
       }
     };
 
     verify();
-  }, [token]);
+  }, [oobCode]);
 
   return (
     <div className="flex min-h-[80vh] items-center justify-center px-4">

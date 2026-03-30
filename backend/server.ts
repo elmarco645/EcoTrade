@@ -3,7 +3,6 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
-import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import db from './db.ts';
 import path from 'path';
@@ -14,9 +13,42 @@ import multer from 'multer';
 import fs from 'fs';
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
+import admin from 'firebase-admin';
+
+console.log('[SERVER] Initializing Firebase Admin...');
+if (!admin) {
+  console.error('[SERVER] Firebase Admin module not found');
+} else {
+  try {
+    const projectId = process.env.FIREBASE_PROJECT_ID || 'ecotrade-94ab2';
+    const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    
+    const config: any = {
+      projectId: projectId,
+    };
+
+    if (credentialsPath) {
+      try {
+        if (fs.existsSync(credentialsPath)) {
+          config.credential = admin.credential.cert(credentialsPath);
+          console.log(`[SERVER] Using service account key from: ${credentialsPath}`);
+        } else {
+          console.warn(`[SERVER] Service account key file not found at: ${credentialsPath}`);
+        }
+      } catch (err) {
+        console.error(`[SERVER] Error loading service account key:`, err);
+      }
+    }
+
+    admin.initializeApp(config);
+    console.log(`[SERVER] Firebase Admin initialized successfully for project: ${projectId}`);
+  } catch (error) {
+    console.error('[SERVER] Failed to initialize Firebase Admin:', error);
+    console.warn('[SERVER] Backend authentication (verifyIdToken, createCustomToken) may fail without service account credentials.');
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const JWT_SECRET = process.env.JWT_SECRET || 'ecotrade_secret_key_123';
 const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET;
 
 const EMAIL_USER = process.env.EMAIL_USER;
@@ -62,34 +94,6 @@ const emailTemplate = (title: string, message: string, buttonText: string, link:
   `;
 };
 
-const sendVerificationEmail = async (email: string, token: string, origin: string) => {
-  if (!EMAIL_USER || !EMAIL_PASS) {
-    console.warn('Email credentials missing. Verification email simulation only.');
-    console.log(`[EMAIL SIMULATION] Verification link for ${email}: ${origin}/verify-email?token=${token}`);
-    return;
-  }
-
-  const link = `${origin}/verify-email?token=${token}`;
-
-  try {
-    await transporter.sendMail({
-      from: `"EcoTrade" <${EMAIL_USER}>`,
-      to: email,
-      subject: 'Verify your EcoTrade account',
-      html: emailTemplate(
-        "Verify Your Email",
-        "Welcome to EcoTrade! We're excited to have you join our community of sustainable traders. Click the button below to verify your account and start trading.",
-        "Verify Email",
-        link
-      )
-    });
-    console.log(`Verification email sent to ${email}`);
-  } catch (error) {
-    console.error('Error sending verification email:', error);
-    throw new Error('Failed to send verification email');
-  }
-};
-
 const sendDeleteUndoEmail = async (email: string, token: string, origin: string) => {
   if (!EMAIL_USER || !EMAIL_PASS) {
     console.warn('Email credentials missing. Delete undo email simulation only.');
@@ -114,61 +118,6 @@ const sendDeleteUndoEmail = async (email: string, token: string, origin: string)
     console.log(`Delete undo email sent to ${email}`);
   } catch (error) {
     console.error('Error sending delete undo email:', error);
-  }
-};
-
-const sendEmailChangeVerificationEmail = async (email: string, token: string, origin: string) => {
-  if (!EMAIL_USER || !EMAIL_PASS) {
-    console.warn('Email credentials missing. Email change simulation only.');
-    console.log(`[EMAIL SIMULATION] Email change link for ${email}: ${origin}/api/user/confirm-email-change?token=${token}`);
-    return;
-  }
-
-  const link = `${origin}/api/user/confirm-email-change?token=${token}`;
-
-  try {
-    await transporter.sendMail({
-      from: `"EcoTrade" <${EMAIL_USER}>`,
-      to: email,
-      subject: 'Confirm your EcoTrade email change',
-      html: emailTemplate(
-        "Confirm Email Change",
-        "You requested to change your email address on EcoTrade. Click the button below to confirm this change. If you didn't request this, please ignore this email.",
-        "Confirm Email Change",
-        link
-      )
-    });
-    console.log(`Email change verification sent to ${email}`);
-  } catch (error) {
-    console.error('Error sending email change verification:', error);
-  }
-};
-
-const sendForgotPasswordEmail = async (email: string, token: string, origin: string) => {
-  if (!EMAIL_USER || !EMAIL_PASS) {
-    console.warn('Email credentials missing. Forgot password email simulation only.');
-    console.log(`[EMAIL SIMULATION] Reset link for ${email}: ${origin}/reset-password?token=${token}`);
-    return;
-  }
-
-  const link = `${origin}/reset-password?token=${token}`;
-
-  try {
-    await transporter.sendMail({
-      from: `"EcoTrade" <${EMAIL_USER}>`,
-      to: email,
-      subject: 'Reset your EcoTrade password',
-      html: emailTemplate(
-        "Reset Your Password",
-        "We received a request to reset your password. If you didn't make this request, you can safely ignore this email. Otherwise, click the button below to choose a new password.",
-        "Reset Password",
-        link
-      )
-    });
-    console.log(`Forgot password email sent to ${email}`);
-  } catch (error) {
-    console.error('Error sending forgot password email:', error);
-    throw new Error('Failed to send reset email');
   }
 };
 
@@ -315,13 +264,17 @@ async function startServer() {
   // Serve uploads statically
   app.use('/uploads', express.static(uploadsDir));
 
-  // --- Auth Routes ---
+  // API routes
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', time: new Date().toISOString() });
   });
 
+  // --- Auth Routes ---
   app.post('/api/auth/register', async (req, res) => {
-    const { email, password, confirmPassword, name, username, phone, avatar, captchaToken } = req.body;
+    const { email, name, username, phone, avatar, captchaToken } = req.body;
+    const authHeader = req.headers['authorization'];
+    const firebaseToken = authHeader && authHeader.split(' ')[1];
+
     try {
       // Verify CAPTCHA
       if (RECAPTCHA_SECRET && !captchaToken) {
@@ -332,22 +285,25 @@ async function startServer() {
         return res.status(400).json({ error: 'Invalid CAPTCHA' });
       }
 
-      if (!password || password.length < 6) {
-        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      if (!firebaseToken) {
+        return res.status(401).json({ error: 'Firebase token required' });
       }
 
-      if (confirmPassword && password !== confirmPassword) {
-        return res.status(400).json({ error: 'Passwords do not match' });
+      // Verify Firebase token
+      const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
+      if (decodedToken.email !== email) {
+        return res.status(400).json({ error: 'Email mismatch' });
       }
 
       if (username && username.length < 3) {
         return res.status(400).json({ error: 'Username must be at least 3 characters' });
       }
 
-      const hashedPassword = await bcrypt.hash(password, 10);
-      const verificationToken = crypto.randomBytes(32).toString('hex');
+      // Use a placeholder password for Firebase users
+      const hashedPassword = 'FIREBASE_USER';
+      const verificationToken = null; // Firebase handles verification
       
-      // Check if email already exists to provide a better error message
+      // Check if email already exists
       const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
       if (existingUser) {
         return res.status(400).json({ 
@@ -357,18 +313,15 @@ async function startServer() {
         });
       }
 
-      const stmt = db.prepare('INSERT INTO users (email, password, name, full_name, username, phone, avatar, verification_token, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)');
+      const stmt = db.prepare('INSERT INTO users (email, password, name, full_name, username, phone, avatar, verification_token, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)');
       const result = stmt.run(email, hashedPassword, name, name, username || null, phone || null, avatar || null, verificationToken);
       
-      // Send real verification email
-      const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
-      await sendVerificationEmail(email, verificationToken, origin);
-      
       res.json({ 
-        message: 'Signup successful! Please check your email to verify your account.',
-        user: { id: result.lastInsertRowid, email, name, username, phone, avatar, role: 'buyer', is_email_verified: 0 } 
+        message: 'Signup successful!',
+        user: { id: result.lastInsertRowid, email, name, username, phone, avatar, role: 'buyer', is_email_verified: 1 } 
       });
     } catch (error: any) {
+      console.error('[REGISTER ERROR]', error);
       if (error.message.includes('UNIQUE constraint failed: users.username')) {
         return res.status(400).json({ error: 'Username already taken' });
       }
@@ -390,10 +343,10 @@ async function startServer() {
   }
 
   app.post('/api/auth/login', async (req, res) => {
-    let { identifier, password, captchaToken } = req.body;
-    identifier = identifier?.trim();
-    console.log(`[LOGIN ATTEMPT] Identifier: ${identifier}`);
-    
+    const { captchaToken } = req.body;
+    const authHeader = req.headers['authorization'];
+    const firebaseToken = authHeader && authHeader.split(' ')[1];
+
     try {
       // Verify CAPTCHA
       if (RECAPTCHA_SECRET && !captchaToken) {
@@ -404,107 +357,33 @@ async function startServer() {
         return res.status(400).json({ error: 'Invalid CAPTCHA' });
       }
 
-      const type = detectInputType(identifier);
-      console.log(`[LOGIN DEBUG] Detected input type: ${type} for "${identifier}"`);
-      
-      let user: any;
-      if (type === "email") {
-        user = db.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?)').get(identifier);
-      } else if (type === "phone") {
-        user = db.prepare('SELECT * FROM users WHERE phone = ?').get(identifier);
-      } else {
-        user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(identifier);
+      if (!firebaseToken) {
+        return res.status(401).json({ error: 'Firebase token required' });
       }
+
+      // Verify Firebase token
+      const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
+      const email = decodedToken.email;
+      
+      const user: any = db.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?)').get(email);
       
       if (!user) {
-        console.log(`[LOGIN FAILED] User not found: "${identifier}"`);
         return res.status(404).json({ 
           error: 'Account not found',
           action: 'SIGNUP'
         });
       }
 
-      // Check if account is locked
-      if (user.lock_until && Date.now() < user.lock_until) {
-        const remainingMinutes = Math.ceil((user.lock_until - Date.now()) / (60 * 1000));
-        console.log(`[LOGIN FAILED] Account locked: ${identifier}, remaining: ${remainingMinutes}m`);
-        return res.status(403).json({ error: `Account locked due to too many failed attempts. Please try again in ${remainingMinutes} minutes.` });
-      }
-
-      let isMatch = false;
-      
-      // Hybrid password check: support both bcrypt and plain-text (for old accounts)
-      if (user.password && user.password.startsWith('$2')) {
-        try {
-          isMatch = await bcrypt.compare(password, user.password);
-        } catch (err) {
-          console.error(`[LOGIN ERROR] Bcrypt comparison failed for ${identifier}:`, err);
-          isMatch = false;
-        }
-      } else {
-        // Plain text fallback
-        isMatch = password === user.password;
-        
-        // Upgrade to hashed password on successful login
-        if (isMatch) {
-          try {
-            const hashed = await bcrypt.hash(password, 10);
-            db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashed, user.id);
-            console.log(`[LOGIN] Upgraded password to bcrypt for user: ${identifier}`);
-          } catch (upgradeErr) {
-            console.error(`[LOGIN ERROR] Failed to upgrade password for ${identifier}:`, upgradeErr);
-          }
-        }
-      }
-      
-      if (!isMatch) {
-        console.log(`[LOGIN FAILED] Password mismatch for: ${identifier}`);
-        
-        const attempts = (user.failed_attempts || 0) + 1;
-        let lockUntil = null;
-
-        if (attempts >= 5) {
-          lockUntil = Date.now() + (15 * 60 * 1000); // 15 mins
-          console.log(`[LOGIN FAILED] Locking account: ${identifier} until ${new Date(lockUntil).toISOString()}`);
-        }
-        
-        db.prepare('UPDATE users SET failed_attempts = ?, lock_until = ? WHERE id = ?').run(attempts, lockUntil, user.id);
-        
-        // Artificial delay to prevent brute-force
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        return res.status(401).json({ error: 'Incorrect password' });
-      }
-
-      // Reset failed attempts on success
-      db.prepare('UPDATE users SET failed_attempts = 0, lock_until = NULL WHERE id = ?').run(user.id);
-
       if (user.deleted_at) {
         return res.status(403).json({ 
           error: 'Account scheduled for deletion', 
-          message: 'This account is scheduled for deletion. Please check your email for the restoration link if you wish to undo this.' 
-        });
-      }
-
-      if (!user.is_email_verified) {
-        console.log(`[LOGIN FAILED] Email not verified: ${identifier}`);
-        return res.status(403).json({ 
-          error: 'Email not verified', 
-          message: 'Your email is not verified. Please check your email for the verification link.',
-          showResend: true,
-          email: user.email
+          message: 'This account is scheduled for deletion.' 
         });
       }
 
       console.log(`[LOGIN SUCCESS] User: ${user.email}`);
-      const token = jwt.sign(
-        { id: user.id, email: user.email, username: user.username }, 
-        JWT_SECRET,
-        { expiresIn: '7d' }
-      );
       
       res.json({ 
-        token, 
         user: { 
           id: user.id, 
           email: user.email, 
@@ -512,86 +391,36 @@ async function startServer() {
           username: user.username, 
           role: user.role, 
           avatar: user.avatar || user.avatar_url || "/default-avatar.png",
-          is_email_verified: user.is_email_verified, 
+          is_email_verified: 1, 
           is_seller_verified: user.is_seller_verified 
         } 
       });
     } catch (error: any) {
       console.error('[LOGIN ERROR]', error);
-      res.status(500).json({ error: error.message || 'Internal server error' });
+      res.status(401).json({ error: 'Invalid or expired token' });
     }
   });
 
-  app.get('/api/auth/verify-email', async (req, res) => {
-    const { token } = req.query;
-    if (!token) return res.status(400).json({ error: 'Token is required' });
-
-    const user: any = db.prepare('SELECT id FROM users WHERE verification_token = ?').get(token);
-    if (!user) return res.status(400).json({ error: 'Invalid or expired verification token' });
-
-    db.prepare('UPDATE users SET is_email_verified = 1, verification_token = NULL WHERE id = ?').run(user.id);
-    res.json({ success: true, message: 'Email verified successfully! You can now log in.' });
-  });
-
-  app.post('/api/auth/resend-verification', async (req, res) => {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required' });
-
+  app.post('/api/auth/resolve-email', async (req, res) => {
+    const { identifier } = req.body;
     try {
-      const user: any = db.prepare('SELECT id, is_email_verified FROM users WHERE email = ?').get(email);
-      if (!user) return res.status(404).json({ error: 'User not found' });
-      if (user.is_email_verified) return res.status(400).json({ error: 'Email is already verified' });
-
-      const verificationToken = crypto.randomBytes(32).toString('hex');
-      db.prepare('UPDATE users SET verification_token = ? WHERE id = ?').run(verificationToken, user.id);
-
-      const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
-      await sendVerificationEmail(email, verificationToken, origin);
-      res.json({ success: true, message: 'Verification email resent successfully!' });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.post('/api/auth/forgot-password', async (req, res) => {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required' });
-
-    try {
-      const user: any = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-      
-      if (user) {
-        const resetToken = crypto.randomBytes(32).toString('hex');
-        const resetTokenExpiry = new Date(Date.now() + 3600000).toISOString(); // 1 hour
-        
-        db.prepare('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?')
-          .run(resetToken, resetTokenExpiry, user.id);
-          
-      const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
-      await sendForgotPasswordEmail(email, resetToken, origin);
+      const type = detectInputType(identifier);
+      let user: any;
+      if (type === "email") {
+        user = db.prepare('SELECT email FROM users WHERE LOWER(email) = LOWER(?)').get(identifier);
+      } else if (type === "phone") {
+        user = db.prepare('SELECT email FROM users WHERE phone = ?').get(identifier);
+      } else {
+        user = db.prepare('SELECT email FROM users WHERE LOWER(username) = LOWER(?)').get(identifier);
       }
-      
-      // Always return success to prevent email enumeration
-      res.json({ success: true, message: 'If an account exists with that email, a reset link has been sent.' });
+
+      if (!user) {
+        return res.status(404).json({ error: 'Account not found' });
+      }
+      res.json({ email: user.email });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
-  });
-
-  app.post('/api/auth/reset-password', async (req, res) => {
-    const { token, password } = req.body;
-    if (!token || !password) return res.status(400).json({ error: 'Token and password are required' });
-
-    const user: any = db.prepare('SELECT id FROM users WHERE reset_token = ? AND reset_token_expiry > ?')
-      .get(token, new Date().toISOString());
-      
-    if (!user) return res.status(400).json({ error: 'Invalid or expired reset token' });
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    db.prepare('UPDATE users SET password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?')
-      .run(hashedPassword, user.id);
-      
-    res.json({ success: true, message: 'Password has been reset successfully.' });
   });
 
   // --- OAuth Routes ---
@@ -633,6 +462,10 @@ async function startServer() {
 
     try {
       let user: any = null;
+      let email: string = '';
+      let name: string = '';
+      let avatarUrl: string = '';
+
       if (state === 'google') {
         const tokenRes = await axios.post('https://oauth2.googleapis.com/token', {
           code,
@@ -646,6 +479,9 @@ async function startServer() {
           headers: { Authorization: `Bearer ${access_token}` }
         });
         const googleUser = userRes.data; // { id, email, name, picture }
+        email = googleUser.email;
+        name = googleUser.name;
+        avatarUrl = googleUser.picture;
         
         user = db.prepare('SELECT * FROM users WHERE google_id = ? OR email = ?').get(googleUser.id, googleUser.email);
         if (!user) {
@@ -668,8 +504,10 @@ async function startServer() {
           headers: { Authorization: `Bearer ${access_token}` }
         });
         const githubUser = userRes.data; // { id, email, name, login, avatar_url }
+        name = githubUser.name || githubUser.login;
+        avatarUrl = githubUser.avatar_url;
         
-        let email = githubUser.email;
+        email = githubUser.email;
         if (!email) {
           const emailsRes = await axios.get('https://api.github.com/user/emails', {
             headers: { Authorization: `Bearer ${access_token}` }
@@ -689,7 +527,26 @@ async function startServer() {
       }
 
       if (user) {
-        const token = jwt.sign({ id: user.id, email: user.email, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+        // Ensure user exists in Firebase
+        let firebaseUser;
+        try {
+          firebaseUser = await admin.auth().getUserByEmail(email);
+        } catch (err: any) {
+          if (err.code === 'auth/user-not-found') {
+            firebaseUser = await admin.auth().createUser({
+              email,
+              displayName: name,
+              photoURL: avatarUrl,
+              emailVerified: true
+            });
+          } else {
+            throw err;
+          }
+        }
+
+        // Create Firebase Custom Token
+        const customToken = await admin.auth().createCustomToken(firebaseUser.uid);
+
         res.send(`
           <html>
             <body>
@@ -697,8 +554,8 @@ async function startServer() {
                 if (window.opener) {
                   window.opener.postMessage({ 
                     type: 'OAUTH_AUTH_SUCCESS', 
-                    token: '${token}', 
-                    user: ${JSON.stringify({ id: user.id, email: user.email, name: user.name, username: user.username, role: user.role, is_email_verified: user.is_email_verified })} 
+                    customToken: '${customToken}', 
+                    user: ${JSON.stringify({ id: user.id, email: user.email, name: user.name, username: user.username, role: user.role, is_email_verified: 1 })} 
                   }, '*');
                   window.close();
                 } else {
@@ -719,23 +576,36 @@ async function startServer() {
   });
 
   // --- Middleware ---
-  const authenticateToken = (req: any, res: any, next: any) => {
+  const authenticateToken = async (req: any, res: any, next: any) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return res.sendStatus(401);
 
-    jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-      if (err) return res.sendStatus(403);
+    try {
+      // Verify Firebase ID Token
+      const decodedToken = await admin.auth().verifyIdToken(token);
+      const email = decodedToken.email;
+
+      const dbUser: any = db.prepare('SELECT id, email, username, deleted_at FROM users WHERE LOWER(email) = LOWER(?)').get(email);
       
-      // Check if user is deleted
-      const dbUser: any = db.prepare('SELECT deleted_at FROM users WHERE id = ?').get(user.id);
-      if (dbUser && dbUser.deleted_at) {
+      if (!dbUser) {
+        return res.status(403).json({ error: 'User not found in local database' });
+      }
+
+      if (dbUser.deleted_at) {
         return res.status(403).json({ error: 'Account scheduled for deletion' });
       }
 
-      req.user = user;
+      req.user = {
+        id: dbUser.id,
+        email: dbUser.email,
+        username: dbUser.username
+      };
       next();
-    });
+    } catch (error) {
+      console.error('Auth middleware error:', error);
+      return res.sendStatus(403);
+    }
   };
 
   app.get('/api/user/profile', authenticateToken, (req: any, res) => {
@@ -1489,12 +1359,23 @@ async function startServer() {
 
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-      root: path.resolve(__dirname, '../frontend'),
-    });
-    app.use(vite.middlewares);
+    try {
+      console.log('[SERVER] Initializing Vite dev server...');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+        root: path.resolve(__dirname, '../frontend'),
+      });
+      app.use((req, res, next) => {
+        if (req.url.startsWith('/api')) return next();
+        console.log(`[SERVER] Static Request: ${req.method} ${req.url}`);
+        next();
+      });
+      app.use(vite.middlewares);
+      console.log('[SERVER] Vite dev server initialized');
+    } catch (err) {
+      console.error('[SERVER] Failed to initialize Vite dev server:', err);
+    }
   } else {
     app.use(express.static(path.resolve(__dirname, '../frontend/dist')));
     app.get('*', (req, res) => res.sendFile(path.resolve(__dirname, '../frontend/dist/index.html')));
@@ -1571,4 +1452,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error('[SERVER] Failed to start server:', err);
+  process.exit(1);
+});

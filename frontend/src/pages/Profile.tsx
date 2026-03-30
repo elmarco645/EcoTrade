@@ -9,6 +9,8 @@ import {
   ChevronRight, Award, Zap, Shield, Download, Trash2, Lock, Mail, Key
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { updatePassword, verifyBeforeUpdateEmail, deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
+import { auth } from '../firebase';
 
 export default function Profile({ user: initialUser }: { user: any }) {
   const navigate = useNavigate();
@@ -38,7 +40,7 @@ export default function Profile({ user: initialUser }: { user: any }) {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isChangingEmail, setIsChangingEmail] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
-  const [emailForm, setEmailForm] = useState({ newEmail: '' });
+  const [emailForm, setEmailForm] = useState({ newEmail: '', password: '' });
   const [deletePassword, setDeletePassword] = useState('');
   const [nationalId, setNationalId] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
@@ -195,6 +197,14 @@ export default function Profile({ user: initialUser }: { user: any }) {
     setActionLoading(true);
     setError('');
     try {
+      const user = auth.currentUser;
+      if (!user || !user.email) throw new Error('No user found');
+
+      // Re-authenticate first
+      const credential = EmailAuthProvider.credential(user.email, deletePassword);
+      await reauthenticateWithCredential(user, credential);
+
+      // Call backend to cleanup data
       const res = await fetch('/api/user/delete-account', {
         method: 'POST',
         headers: {
@@ -204,20 +214,28 @@ export default function Profile({ user: initialUser }: { user: any }) {
         body: JSON.stringify({ password: deletePassword })
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        setSuccess(data.message);
-        setTimeout(() => {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          navigate('/login');
-          window.location.reload();
-        }, 3000);
-      } else {
-        setError(data.error || 'Failed to schedule deletion');
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to cleanup backend data');
       }
-    } catch (err) {
-      setError('Error scheduling deletion');
+
+      // Delete from Firebase
+      await deleteUser(user);
+
+      setSuccess('Account deleted successfully');
+      setTimeout(() => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        navigate('/login');
+        window.location.reload();
+      }, 3000);
+    } catch (err: any) {
+      console.error('Delete account error:', err);
+      if (err.code === 'auth/wrong-password') {
+        setError('Incorrect password.');
+      } else {
+        setError(err.message || 'Error deleting account');
+      }
     } finally {
       setActionLoading(false);
     }
@@ -233,27 +251,28 @@ export default function Profile({ user: initialUser }: { user: any }) {
     setError('');
     setSuccess('');
     try {
-      const res = await fetch('/api/user/change-password', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          oldPassword: passwordForm.oldPassword,
-          newPassword: passwordForm.newPassword
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSuccess('Password changed successfully');
-        setIsChangingPassword(false);
-        setPasswordForm({ oldPassword: '', newPassword: '', confirmPassword: '' });
+      const user = auth.currentUser;
+      if (!user || !user.email) throw new Error('No user found');
+
+      // Re-authenticate first
+      const credential = EmailAuthProvider.credential(user.email, passwordForm.oldPassword);
+      await reauthenticateWithCredential(user, credential);
+
+      // Update password in Firebase
+      await updatePassword(user, passwordForm.newPassword);
+
+      setSuccess('Password changed successfully');
+      setIsChangingPassword(false);
+      setPasswordForm({ oldPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err: any) {
+      console.error('Change password error:', err);
+      if (err.code === 'auth/wrong-password') {
+        setError('Incorrect current password.');
+      } else if (err.code === 'auth/requires-recent-login') {
+        setError('Please log out and log back in to change your password.');
       } else {
-        setError(data.error || 'Failed to change password');
+        setError(err.message || 'Failed to change password');
       }
-    } catch (err) {
-      setError('Error changing password');
     } finally {
       setActionLoading(false);
     }
@@ -261,28 +280,37 @@ export default function Profile({ user: initialUser }: { user: any }) {
 
   const handleRequestEmailChange = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!emailForm.password) {
+      setError('Please enter your password to confirm email change');
+      return;
+    }
     setActionLoading(true);
     setError('');
     setSuccess('');
     try {
-      const res = await fetch('/api/user/request-email-change', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ newEmail: emailForm.newEmail })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSuccess('Verification email sent to ' + emailForm.newEmail);
-        setIsChangingEmail(false);
-        setEmailForm({ newEmail: '' });
+      const user = auth.currentUser;
+      if (!user || !user.email) throw new Error('No user found');
+
+      // 🔐 Re-authenticate first as requested by user
+      const credential = EmailAuthProvider.credential(user.email, emailForm.password);
+      await reauthenticateWithCredential(user, credential);
+
+      // verifyBeforeUpdateEmail sends a verification email to the NEW email
+      // and only updates it once verified.
+      await verifyBeforeUpdateEmail(user, emailForm.newEmail);
+
+      setSuccess('Verification email sent to ' + emailForm.newEmail + '. Please verify it to complete the change.');
+      setIsChangingEmail(false);
+      setEmailForm({ newEmail: '', password: '' });
+    } catch (err: any) {
+      console.error('Email change error:', err);
+      if (err.code === 'auth/wrong-password') {
+        setError('Incorrect password.');
+      } else if (err.code === 'auth/requires-recent-login') {
+        setError('Please log out and log back in to change your email.');
       } else {
-        setError(data.error || 'Failed to request email change');
+        setError(err.message || 'Failed to request email change');
       }
-    } catch (err) {
-      setError('Error requesting email change');
     } finally {
       setActionLoading(false);
     }
@@ -1233,6 +1261,21 @@ export default function Profile({ user: initialUser }: { user: any }) {
                     />
                   </div>
                 </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Confirm Password</label>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                    <input 
+                      type="password" 
+                      required
+                      value={emailForm.password} 
+                      onChange={(e) => setEmailForm({...emailForm, password: e.target.value})}
+                      placeholder="Enter your password"
+                      className="h-16 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 font-semibold outline-none transition-all focus:border-emerald-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
                 
                 <motion.button 
                   whileHover={{ scale: 1.02 }}
@@ -1241,7 +1284,7 @@ export default function Profile({ user: initialUser }: { user: any }) {
                   disabled={actionLoading}
                   className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 font-black text-white shadow-xl shadow-emerald-200 hover:bg-emerald-700 disabled:opacity-50 transition-all"
                 >
-                  {actionLoading ? <Loader2 className="animate-spin" /> : 'Send Verification Link'}
+                  {actionLoading ? <Loader2 className="animate-spin" /> : 'Request Email Change'}
                 </motion.button>
               </form>
             </motion.div>

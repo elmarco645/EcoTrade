@@ -1,17 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Lock, Loader2, CheckCircle2, Eye, EyeOff, ArrowLeft } from 'lucide-react';
+import { confirmPasswordReset, verifyPasswordResetCode } from 'firebase/auth';
+import { auth } from '../firebase';
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
-  const token = searchParams.get('token');
+  const oobCode = searchParams.get('oobCode');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [email, setEmail] = useState('');
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (oobCode) {
+      verifyPasswordResetCode(auth, oobCode)
+        .then((email) => {
+          setEmail(email);
+        })
+        .catch((err) => {
+          console.error('Invalid or expired code:', err);
+          setError('This password reset link is invalid or has expired.');
+        });
+    }
+  }, [oobCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,25 +44,18 @@ export default function ResetPassword() {
     setError('');
 
     try {
-      const res = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, password }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSuccess(true);
-      } else {
-        setError(data.error);
-      }
-    } catch (err) {
-      setError('Something went wrong. Please try again.');
+      if (!oobCode) throw new Error('No reset code found');
+      await confirmPasswordReset(auth, oobCode, password);
+      setSuccess(true);
+    } catch (err: any) {
+      console.error('Reset password error:', err);
+      setError(err.message || 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (!token) {
+  if (!oobCode || (error && !success)) {
     return (
       <div className="flex min-h-[80vh] items-center justify-center px-4">
         <div className="w-full max-w-md space-y-8 rounded-[2.5rem] bg-white p-10 shadow-xl border border-slate-100 text-center">
@@ -74,6 +83,7 @@ export default function ResetPassword() {
             <Lock className="h-6 w-6" />
           </div>
           <h2 className="mt-6 text-3xl font-bold tracking-tight">Set New Password</h2>
+          {email && <p className="mt-1 text-sm text-blue-600 font-medium">Resetting password for {email}</p>}
           <p className="mt-2 text-slate-500">Your new password must be different from previous ones.</p>
         </div>
 

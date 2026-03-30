@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Mail, ArrowLeft, Loader2, CheckCircle2 } from 'lucide-react';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth } from '../firebase';
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -15,19 +17,15 @@ export default function ForgotPassword() {
     setMessage('');
 
     try {
-      const res = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setMessage(data.message);
+      await sendPasswordResetEmail(auth, email);
+      setMessage('Password reset email sent! Please check your inbox.');
+    } catch (err: any) {
+      console.error('Password reset error:', err);
+      if (err.code === 'auth/user-not-found') {
+        setError('No account found with this email.');
       } else {
-        setError(data.error);
+        setError(err.message || 'Something went wrong. Please try again.');
       }
-    } catch (err) {
-      setError('Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }

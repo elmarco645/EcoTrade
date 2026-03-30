@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { User as UserIcon, Lock, Loader2, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { User as UserIcon, Lock, Loader2, ShieldCheck, Eye, EyeOff, Github } from 'lucide-react';
 import ReCAPTCHA from 'react-google-recaptcha';
+import { signInWithEmailAndPassword, signInWithCustomToken, sendEmailVerification } from 'firebase/auth';
+import { auth } from '../firebase';
 
 export default function Login({ setUser }: { setUser: (user: any) => void }) {
   const [identifier, setIdentifier] = useState(() => {
@@ -20,28 +22,58 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
   const [unverifiedEmail, setUnverifiedEmail] = useState('');
   const navigate = useNavigate();
 
+  useEffect(() => {
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        const { customToken, user } = event.data;
+        if (customToken) {
+          try {
+            setLoading(true);
+            await signInWithCustomToken(auth, customToken);
+            setUser(user);
+            navigate('/profile');
+          } catch (err: any) {
+            console.error('Custom token sign-in failed:', err);
+            setError('OAuth sign-in failed. Please try again.');
+          } finally {
+            setLoading(false);
+          }
+        }
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [navigate, setUser]);
+
+  const handleOAuth = async (provider: 'google' | 'github') => {
+    try {
+      const res = await fetch(`/api/auth/${provider}/url`);
+      const { url } = await res.json();
+      window.open(url, 'oauth_popup', 'width=600,height=700');
+    } catch (err) {
+      console.error(`${provider} OAuth error:`, err);
+      setError(`Failed to start ${provider} login`);
+    }
+  };
+
   const siteKey = (import.meta as any).env.VITE_RECAPTCHA_SITE_KEY;
 
   const handleResendVerification = async () => {
-    if (!unverifiedEmail) return;
+    const user = auth.currentUser;
+    if (!user) {
+      setError('No user found to resend verification.');
+      return;
+    }
     setResending(true);
     setResendSuccess('');
     setError('');
     try {
-      const res = await fetch('/api/auth/resend-verification', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: unverifiedEmail }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setResendSuccess('Verification email sent! Please check your inbox.');
-        setShowResend(false);
-      } else {
-        setError(data.error);
-      }
-    } catch (err) {
-      setError('Failed to resend verification email.');
+      await sendEmailVerification(user);
+      setResendSuccess('Verification email sent again! Please check your inbox.');
+      setShowResend(false);
+    } catch (err: any) {
+      console.error('Resend verification error:', err);
+      setError(err.message || 'Failed to resend verification email.');
     } finally {
       setResending(false);
     }
@@ -62,14 +94,44 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
     setResendSuccess('');
 
     try {
+      let emailToUse = identifier;
+
+      // If identifier is not an email, we might need to resolve it on the backend
+      if (!identifier.includes('@')) {
+        const resolveRes = await fetch(`/api/auth/resolve-email?identifier=${encodeURIComponent(identifier)}`);
+        if (resolveRes.ok) {
+          const resolveData = await resolveRes.json();
+          emailToUse = resolveData.email;
+        }
+      }
+
+      // 1. Sign in with Firebase Auth
+      const userCredential = await signInWithEmailAndPassword(auth, emailToUse, password);
+      const firebaseUser = userCredential.user;
+
+      // Check if email is verified as requested by user
+      if (!firebaseUser.emailVerified) {
+        setUnverifiedEmail(firebaseUser.email!);
+        setShowResend(true);
+        setError('Please verify your email first.');
+        setLoading(false);
+        return;
+      }
+
+      const token = await firebaseUser.getIdToken();
+
+      // 2. Sync with our backend
       const res = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier, password, captchaToken }),
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ captchaToken }),
       });
       const data = await res.json();
       if (res.ok) {
-        localStorage.setItem('token', data.token);
+        localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(data.user));
         localStorage.setItem('username', data.user.username);
         localStorage.setItem('avatar', data.user.avatar);
@@ -85,8 +147,18 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
           setShowSignupAction(true);
         }
       }
-    } catch (err) {
-      setError('Something went wrong. Please try again.');
+    } catch (err: any) {
+      console.error('Login error:', err);
+      if (err.code === 'auth/user-not-found') {
+        setError('Account not found');
+        setShowSignupAction(true);
+      } else if (err.code === 'auth/wrong-password') {
+        setError('Incorrect password');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Invalid email format');
+      } else {
+        setError(err.message || 'Something went wrong. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -192,6 +264,32 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
             {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : 'Sign In'}
           </button>
         </form>
+
+        <div className="relative my-8">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-slate-200"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="bg-white px-4 text-slate-500">Or continue with</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <button
+            onClick={() => handleOAuth('google')}
+            className="flex h-12 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white font-medium text-slate-700 transition-all hover:bg-slate-50"
+          >
+            <img src="https://www.google.com/favicon.ico" alt="Google" className="h-4 w-4" />
+            Google
+          </button>
+          <button
+            onClick={() => handleOAuth('github')}
+            className="flex h-12 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white font-medium text-slate-700 transition-all hover:bg-slate-50"
+          >
+            <Github className="h-4 w-4" />
+            GitHub
+          </button>
+        </div>
 
         <p className="text-center text-sm text-slate-500">
           Don't have an account?{' '}
