@@ -1,6 +1,7 @@
 # EcoTrade Git Workflow Guide
 
 ## 📋 Current Setup
+
 - **Repository**: Single `main` branch (consolidated)
 - **Status**: All branches merged, clean working tree
 - **Remote**: Synced with `origin/main`
@@ -10,6 +11,7 @@
 ## 🔄 Daily Workflow (Smooth Syncing)
 
 ### 1. START YOUR WORKDAY
+
 ```bash
 # Pull latest changes from remote
 git pull origin main
@@ -19,12 +21,14 @@ git checkout -b feature/your-feature-name
 ```
 
 ### 2. MAKE CHANGES
+
 ```bash
 # Make your code changes...
 # Edit files as needed
 ```
 
 ### 3. COMMIT CHANGES
+
 ```bash
 # Stage all changes
 git add .
@@ -38,6 +42,7 @@ git commit -m "feat: Brief description of changes
 ```
 
 ### 4. PUSH TO REMOTE
+
 ```bash
 # Push your feature branch
 git push origin feature/your-feature-name
@@ -47,6 +52,7 @@ git push origin main
 ```
 
 ### 5. BEFORE MERGING BACK TO MAIN
+
 ```bash
 # Fetch latest changes
 git fetch origin
@@ -68,6 +74,7 @@ git push origin feature/your-feature-name --force-with-lease
 ## ⚠️ SECURITY RULES (ENFORCED)
 
 ### ❌ DO NOT COMMIT
+
 - Firebase credentials (`.json` files with keys)
 - API keys or secrets
 - `.env` files (use `.env.example` instead)
@@ -75,17 +82,19 @@ git push origin feature/your-feature-name --force-with-lease
 - Private keys or tokens
 
 ### ✅ DO COMMIT
+
 - `.env.example` (template only, with dummy values)
 - `package.json` and `package-lock.json`
 - Configuration files without secrets
 - `.gitignore` updates
 
 ### Files Explicitly Ignored (Auto-Blocked)
-```
+
+```bash
 *-firebase-adminsdk-*.json  # Firebase service accounts
 .env                        # Environment variables
 .hintrc                     # IDE configs
-credentials.json            # Any credential files
+credentials.json            # Credential files
 secrets.json                # Secret configs
 ```
 
@@ -94,6 +103,7 @@ secrets.json                # Secret configs
 ## 🔧 SAFE MERGE PROCESS (If using branches)
 
 ### Merge to Main (Recommended Process)
+
 ```bash
 # 1. Switch to main
 git checkout main
@@ -116,7 +126,8 @@ git push origin --delete feature/your-feature-name
 
 ## 🚨 EMERGENCY PROCEDURES
 
-### If you accidentally pushed secrets:
+### If you accidentally pushed secrets
+
 ```bash
 # 1. Contact admin - secrets may be exposed
 # 2. Rotate credentials immediately
@@ -127,7 +138,8 @@ git commit -m "security: Remove exposed credentials"
 git push origin main
 ```
 
-### If you have merge conflicts:
+### If you have merge conflicts
+
 ```bash
 # Option 1: Resolve manually
 # - Edit conflicted files
@@ -141,7 +153,8 @@ git merge --abort
 git pull origin main
 ```
 
-### If you need to undo last commit:
+### If you need to undo last commit
+
 ```bash
 # If not pushed yet:
 git reset --soft HEAD~1  # Keep changes
@@ -156,12 +169,13 @@ git push origin main
 
 ## 📊 Current Repository Status
 
-**Consolidated on**: March 31, 2026  
-**Branch**: `main` only  
-**Remote Status**: Up to date  
-**Working Tree**: Clean  
+**Consolidated on**: March 31, 2026
+**Branch**: `main` only
+**Remote Status**: Up to date
+**Working Tree**: Clean
 
 ### Latest Changes
+
 - Firebase authentication config fixed
 - Wallet component error handling improved
 - Search functionality enhanced with safe JSON parsing
@@ -183,8 +197,9 @@ git push origin main
 
 ## 🎯 COMMIT MESSAGE FORMAT
 
-### Good Example:
-```
+### Good Example
+
+```text
 feat: Add error handling to Wallet page
 
 - Display error state when API fails
@@ -194,7 +209,8 @@ feat: Add error handling to Wallet page
 Resolves: #123
 ```
 
-### Commit Types:
+### Commit Types
+
 - `feat` - New feature
 - `fix` - Bug fix
 - `refactor` - Code refactoring
@@ -245,11 +261,13 @@ git push origin --delete feature/name
 ## 🆘 NEED HELP?
 
 Check git status for guidance:
+
 ```bash
 git status
 ```
 
 It will tell you:
+
 - What branch you're on
 - What files are changed
 - What files are staged
@@ -257,6 +275,6 @@ It will tell you:
 
 ---
 
-**Last Updated**: March 31, 2026  
-**Repository**: EcoTrade  
+**Last Updated**: March 31, 2026
+**Repository**: EcoTrade
 **Owner**: elmarco645

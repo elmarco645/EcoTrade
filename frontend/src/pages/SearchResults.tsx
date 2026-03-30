@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Filter, MapPin, Tag, Star, X, ChevronDown, Check, ArrowLeft } from 'lucide-react';
+import { Search, Filter, MapPin, Star, X, Check, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const CATEGORIES = [
@@ -58,11 +58,11 @@ export default function SearchResults() {
 
   const filteredListings = listings.filter(l => {
     try {
-      if (!l || !l.title || !l.category) return false;
+      if (!l?.title || !l?.category) return false;
       
       const matchesSearch = l.title.toLowerCase().includes(query.toLowerCase()) ||
                            l.category.toLowerCase().includes(query.toLowerCase()) ||
-                           (l.description && l.description.toLowerCase().includes(query.toLowerCase()));
+                           l.description?.toLowerCase().includes(query.toLowerCase());
       
       const matchesCategory = !filters.category || l.category === filters.category;
       const matchesCondition = !filters.condition || l.condition === filters.condition;
@@ -95,6 +95,104 @@ export default function SearchResults() {
     return value ? acc + 1 : acc;
   }, 0);
 
+  const renderContent = () => {
+    if (loading) {
+      return (
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} className="animate-pulse space-y-4">
+              <div className="aspect-square rounded-3xl bg-slate-200" />
+              <div className="h-4 w-2/3 rounded bg-slate-200" />
+              <div className="h-4 w-1/3 rounded bg-slate-200" />
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (filteredListings.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="mb-4 rounded-full bg-slate-100 p-6 text-slate-400">
+            <Search size={48} />
+          </div>
+          <h2 className="text-xl font-bold">No results found for "{query}"</h2>
+          <p className="text-slate-500">Try adjusting your filters or search terms.</p>
+          <button 
+            onClick={resetFilters}
+            className="mt-6 font-bold text-blue-600 hover:underline"
+          >
+            Clear all filters
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
+        {filteredListings.map((listing, idx) => {
+          if (!listing?.id) return null;
+          
+          let imageUrl = `https://picsum.photos/seed/${listing.id}/400/400`;
+          try {
+            const images = listing.images ? JSON.parse(listing.images) : [];
+            if (Array.isArray(images) && images.length > 0) {
+              imageUrl = images[0];
+            }
+          } catch (err) {
+            console.warn('[SEARCH] Failed to parse images for listing:', listing.id, err);
+          }
+          
+          return (
+            <motion.div
+              key={listing.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: idx * 0.05 }}
+            >
+              <Link
+                to={`/listing/${listing.id}`}
+                className="group block space-y-4 rounded-[2rem] border border-transparent bg-white p-4 transition-all hover:border-slate-200 hover:shadow-xl"
+              >
+                <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-100">
+                  <img
+                    src={imageUrl}
+                    alt={listing.title || 'Item'}
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      e.currentTarget.src = `https://picsum.photos/seed/${listing.id}/400/400`;
+                    }}
+                  />
+                  <div className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-blue-600 backdrop-blur-sm">
+                    {listing.condition || 'Used'}
+                  </div>
+                </div>
+                <div className="space-y-1 px-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium uppercase tracking-wider text-slate-400">{listing.category || 'Other'}</span>
+                    <div className="flex items-center gap-1 text-xs font-bold text-amber-500">
+                      <Star className="h-3 w-3 fill-current" />
+                      {listing.seller_rating || 'New'}
+                    </div>
+                  </div>
+                  <h3 className="line-clamp-1 font-bold text-slate-900">{listing.title || 'Untitled'}</h3>
+                  <div className="flex items-center justify-between pt-2">
+                    <span className="text-lg font-black text-blue-600">${listing.price || '0'}</span>
+                    <div className="flex items-center gap-1 text-xs text-slate-400">
+                      <MapPin className="h-3 w-3" />
+                      {listing.location || 'N/A'}
+                    </div>
+                  </div>
+                </div>
+              </Link>
+            </motion.div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -105,13 +203,16 @@ export default function SearchResults() {
           </Link>
           <h1 className="text-3xl font-bold">Search Results</h1>
           <p className="text-slate-500">
-            {loading ? 'Searching...' : error ? 'Error loading results' : `Found ${filteredListings.length} results for "${query}"`}
+            {loading && 'Searching...'}
+            {error && 'Error loading results'}
+            {!loading && !error && `Found ${filteredListings.length} results for "${query}"`}
           </p>
         </div>
         
         <button 
           onClick={() => setShowFilters(true)}
           className="flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 font-medium text-slate-600 hover:bg-slate-50 lg:hidden"
+          title="Open filters"
         >
           <Filter className="h-4 w-4" />
           Filters
@@ -127,7 +228,7 @@ export default function SearchResults() {
         <div className="rounded-2xl bg-red-50 p-6 border border-red-200">
           <p className="text-sm text-red-700 font-medium">Error: {error}</p>
           <button 
-            onClick={() => window.location.reload()}
+            onClick={() => globalThis.location.reload()}
             className="mt-4 text-xs font-bold text-red-600 hover:underline"
           >
             Retry
@@ -216,6 +317,7 @@ export default function SearchResults() {
                 value={filters.location}
                 onChange={(e) => setFilters(f => ({ ...f, location: e.target.value }))}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+                title="Filter by location"
               >
                 <option value="">All Locations</option>
                 {LOCATIONS.map(loc => (
@@ -239,93 +341,7 @@ export default function SearchResults() {
 
         {/* Main Content */}
         <div className="flex-1">
-          {loading ? (
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
-              {[1, 2, 3, 4, 5, 6].map(i => (
-                <div key={i} className="animate-pulse space-y-4">
-                  <div className="aspect-square rounded-3xl bg-slate-200" />
-                  <div className="h-4 w-2/3 rounded bg-slate-200" />
-                  <div className="h-4 w-1/3 rounded bg-slate-200" />
-                </div>
-              ))}
-            </div>
-          ) : filteredListings.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="mb-4 rounded-full bg-slate-100 p-6 text-slate-400">
-                <Search size={48} />
-              </div>
-              <h2 className="text-xl font-bold">No results found for "{query}"</h2>
-              <p className="text-slate-500">Try adjusting your filters or search terms.</p>
-              <button 
-                onClick={resetFilters}
-                className="mt-6 font-bold text-blue-600 hover:underline"
-              >
-                Clear all filters
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
-              {filteredListings.map((listing, idx) => {
-                if (!listing || !listing.id) return null;
-                
-                let imageUrl = `https://picsum.photos/seed/${listing.id}/400/400`;
-                try {
-                  const images = listing.images ? JSON.parse(listing.images) : [];
-                  if (Array.isArray(images) && images.length > 0) {
-                    imageUrl = images[0];
-                  }
-                } catch (err) {
-                  console.warn('[SEARCH] Failed to parse images for listing:', listing.id, err);
-                }
-                
-                return (
-                  <motion.div
-                    key={listing.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.05 }}
-                  >
-                    <Link
-                      to={`/listing/${listing.id}`}
-                      className="group block space-y-4 rounded-[2rem] border border-transparent bg-white p-4 transition-all hover:border-slate-200 hover:shadow-xl"
-                    >
-                      <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-100">
-                        <img
-                          src={imageUrl}
-                          alt={listing.title || 'Item'}
-                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            e.currentTarget.src = `https://picsum.photos/seed/${listing.id}/400/400`;
-                          }}
-                        />
-                        <div className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-blue-600 backdrop-blur-sm">
-                          {listing.condition || 'Used'}
-                        </div>
-                      </div>
-                      <div className="space-y-1 px-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium uppercase tracking-wider text-slate-400">{listing.category || 'Other'}</span>
-                          <div className="flex items-center gap-1 text-xs font-bold text-amber-500">
-                            <Star className="h-3 w-3 fill-current" />
-                            {listing.seller_rating || 'New'}
-                          </div>
-                        </div>
-                        <h3 className="line-clamp-1 font-bold text-slate-900">{listing.title || 'Untitled'}</h3>
-                        <div className="flex items-center justify-between pt-2">
-                          <span className="text-lg font-black text-blue-600">${listing.price || '0'}</span>
-                          <div className="flex items-center gap-1 text-xs text-slate-400">
-                            <MapPin className="h-3 w-3" />
-                            {listing.location || 'N/A'}
-                          </div>
-                        </div>
-                      </div>
-                    </Link>
-                  </motion.div>
-                );
-              })}
-            </div>
-          )}
+          {renderContent()}
         </div>
       </div>
 
@@ -348,15 +364,14 @@ export default function SearchResults() {
             >
               <div className="flex items-center justify-between mb-8">
                 <h2 className="text-xl font-bold">Filters</h2>
-                <button onClick={() => setShowFilters(false)} className="rounded-full p-2 hover:bg-slate-100">
+                <button onClick={() => setShowFilters(false)} className="rounded-full p-2 hover:bg-slate-100" title="Close filters">
                   <X className="h-6 w-6" />
                 </button>
               </div>
               
               <div className="space-y-8">
-                 {/* Re-use filter logic for mobile if needed */}
-                 <p className="text-sm text-slate-500 italic">Filter options are available in the sidebar on desktop.</p>
-                 <button 
+                <p className="text-sm text-slate-500 italic">Filter options are available in the sidebar on desktop.</p>
+                <button 
                   onClick={() => setShowFilters(false)}
                   className="w-full rounded-xl bg-blue-600 py-4 font-bold text-white"
                 >

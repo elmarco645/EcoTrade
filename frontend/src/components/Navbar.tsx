@@ -4,9 +4,9 @@ import { ShoppingBag, MessageSquare, Wallet, User, LogOut, Search, PlusCircle, S
 import LogoutConfirmModal from './LogoutConfirmModal';
 
 interface NavbarProps {
-  user: any;
-  onLogout: () => void;
-  cartCount: number;
+  readonly user: any;
+  readonly onLogout: () => void;
+  readonly cartCount: number;
 }
 
 export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
@@ -32,7 +32,7 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
     if (searchQuery.trim().length > 1) {
       try {
         const filtered = listings.filter(l => {
-          if (!l || !l.title || !l.category) return false;
+          if (!l?.title || !l?.category) return false;
           return l.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                  l.category.toLowerCase().includes(searchQuery.toLowerCase());
         }).slice(0, 5);
@@ -107,6 +107,7 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
                 type="button"
                 onClick={() => setIsMobileSearchOpen(false)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 md:hidden"
+                title="Close search"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -114,7 +115,7 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
             {showSuggestions && Array.isArray(suggestions) && suggestions.length > 0 && (
               <div className="absolute left-0 right-0 top-full mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 z-[1000]">
                 {suggestions.map((item) => {
-                  if (!item || !item.id) return null;
+                  if (!item?.id) return null;
                   
                   let imageUrl = `https://picsum.photos/seed/${item.id}/100/100`;
                   try {
@@ -174,6 +175,7 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
           <button 
             onClick={() => setIsMobileSearchOpen(!isMobileSearchOpen)}
             className="flex h-10 w-10 items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 md:hidden"
+            title="Toggle search"
           >
             <Search className="h-5 w-5" />
           </button>
@@ -213,6 +215,7 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
                   className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border bg-white transition-all ${
                     isMenuOpen ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200 hover:border-blue-500'
                   }`}
+                  title="Open user menu"
                 >
                   {user.avatar ? (
                     <img 

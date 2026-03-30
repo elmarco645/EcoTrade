@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Clock, CheckCircle2, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
-import { motion } from 'motion/react';
 
-export default function Wallet({ user }: { user: any }) {
+export default function Wallet({ user }: readonly { readonly user: any }) {
   const [balance, setBalance] = useState(0);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,7 +46,7 @@ export default function Wallet({ user }: { user: any }) {
         console.log('[WALLET] Transactions data received:', txData);
 
         if (!Array.isArray(txData)) {
-          throw new Error('Invalid transactions data format');
+          throw new TypeError('Invalid transactions data format');
         }
 
         setTransactions(txData);
@@ -77,7 +76,7 @@ export default function Wallet({ user }: { user: any }) {
       });
       if (res.ok) {
         // Refresh data
-        window.location.reload();
+        globalThis.location.reload();
       } else {
         alert('Failed to confirm transaction');
       }
@@ -104,8 +103,9 @@ export default function Wallet({ user }: { user: any }) {
             <h3 className="font-bold text-red-900">Error Loading Wallet</h3>
             <p className="text-sm text-red-700 mt-2">{error}</p>
             <button
-              onClick={() => window.location.reload()}
+              onClick={() => globalThis.location.reload()}
               className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 transition-all"
+              title="Retry loading wallet"
             >
               Retry
             </button>

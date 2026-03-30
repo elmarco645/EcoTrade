@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { User as UserIcon, Lock, Loader2, ShieldCheck, Eye, EyeOff, Github } from 'lucide-react';
+import { User as UserIcon, Lock, Loader2, Eye, EyeOff } from 'lucide-react';
 import ReCAPTCHA from 'react-google-recaptcha';
-import { signInWithEmailAndPassword, signInWithCustomToken, sendEmailVerification } from 'firebase/auth';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../firebase';
 
-export default function Login({ setUser }: { setUser: (user: any) => void }) {
+export default function Login({ setUser }: readonly { readonly setUser: (user: any) => void }) {
   const [email, setEmail] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(globalThis.location.search);
     return params.get('email') || '';
   });
   const [password, setPassword] = useState('');
@@ -19,7 +19,7 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
 
   const siteKey = (import.meta as any).env.VITE_RECAPTCHA_SITE_KEY;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     
     if (siteKey && !captchaToken) {
@@ -57,7 +57,7 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
         displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0],
         avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
         emailVerified: firebaseUser.emailVerified,
-        username: firebaseUser.displayName?.toLowerCase().replace(/\s/g, '') || firebaseUser.email?.split('@')[0],
+        username: firebaseUser.displayName?.toLowerCase().replaceAll(/\s/g, '') || firebaseUser.email?.split('@')[0],
         wallet_balance: 0,
         role: 'user'
       };
