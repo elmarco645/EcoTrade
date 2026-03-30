@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import axios from 'axios';
 import crypto from 'node:crypto';
 import multer from 'multer';
+import sharp from 'sharp';
 import fs from 'node:fs';
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
@@ -270,19 +271,9 @@ async function startServer() {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
 
-  // Configure multer
-  const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, uploadsDir);
-    },
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-      cb(null, uniqueSuffix + path.extname(file.originalname));
-    }
-  });
-
+  // Configure multer with memory storage for sharp processing
   const upload = multer({
-    storage,
+    storage: multer.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
     fileFilter: (req, file, cb) => {
       if (file.mimetype.startsWith('image/')) {
@@ -725,7 +716,7 @@ async function startServer() {
   });
 
   app.patch('/api/user/profile', authenticateToken, async (req: any, res) => {
-    const { name, username, bio, location, avatar_url, avatar, phone, cover_url, social_links } = req.body;
+    const { name, username, bio, location, avatar_url, avatar, phone, cover_url, social_links, dob } = req.body;
     try {
       const userRef = firestore.collection('users').doc(req.user.id);
       const userDoc = await userRef.get();
@@ -774,6 +765,7 @@ async function startServer() {
       if (phone !== undefined) updateData.phone = phone;
       if (cover_url !== undefined) updateData.cover_url = cover_url;
       if (social_links !== undefined) updateData.social_links = social_links;
+      if (dob !== undefined) updateData.dob = dob;
 
       await userRef.update(updateData);
       res.json({ success: true });
@@ -870,22 +862,42 @@ async function startServer() {
 
   app.post('/api/user/upload-avatar', authenticateToken, upload.single('avatar'), async (req: any, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const avatarUrl = `/uploads/${req.file.filename}`;
     try {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+      const filename = `avatar-${uniqueSuffix}.webp`;
+      const outputPath = path.join(__dirname, '../uploads', filename);
+
+      await sharp(req.file.buffer)
+        .resize(400, 400, { fit: 'cover' })
+        .webp({ quality: 80 })
+        .toFile(outputPath);
+
+      const avatarUrl = `/uploads/${filename}`;
       await firestore.collection('users').doc(req.user.id).update({ avatar_url: avatarUrl });
       res.json({ success: true, avatar_url: avatarUrl });
     } catch (error: any) {
+      console.error('[AVATAR UPLOAD ERROR]', error);
       res.status(500).json({ error: error.message });
     }
   });
 
   app.post('/api/user/upload-cover', authenticateToken, upload.single('cover'), async (req: any, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const coverUrl = `/uploads/${req.file.filename}`;
     try {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+      const filename = `cover-${uniqueSuffix}.webp`;
+      const outputPath = path.join(__dirname, '../uploads', filename);
+
+      await sharp(req.file.buffer)
+        .resize(1200, 400, { fit: 'cover', position: 'center' })
+        .webp({ quality: 80 })
+        .toFile(outputPath);
+
+      const coverUrl = `/uploads/${filename}`;
       await firestore.collection('users').doc(req.user.id).update({ cover_url: coverUrl });
       res.json({ success: true, cover_url: coverUrl });
     } catch (error: any) {
+      console.error('[COVER UPLOAD ERROR]', error);
       res.status(500).json({ error: error.message });
     }
   });
