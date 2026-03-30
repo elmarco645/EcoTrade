@@ -7,13 +7,19 @@ import { auth } from '../firebase';
 export default function VerifyEmail() {
   const [searchParams] = useSearchParams();
   const oobCode = searchParams.get('oobCode');
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const email = searchParams.get('email');
+  const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'pending'>(oobCode ? 'loading' : 'pending');
   const [message, setMessage] = useState('');
 
   useEffect(() => {
     if (!oobCode) {
-      setStatus('error');
-      setMessage('Verification code is missing.');
+      if (email) {
+        setStatus('pending');
+        setMessage(`We have sent you a verification email to ${email}. Please verify it and log in.`);
+      } else {
+        setStatus('error');
+        setMessage('Verification code is missing.');
+      }
       return;
     }
 
@@ -30,7 +36,7 @@ export default function VerifyEmail() {
     };
 
     verify();
-  }, [oobCode]);
+  }, [oobCode, email]);
 
   return (
     <div className="flex min-h-[80vh] items-center justify-center px-4">
@@ -44,6 +50,21 @@ export default function VerifyEmail() {
             <h2 className="text-2xl font-bold">Verifying your email...</h2>
             <p className="text-slate-500">Please wait while we confirm your email address.</p>
             <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-600" />
+          </div>
+        )}
+
+        {status === 'pending' && (
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold">Check your inbox</h2>
+              <p className="text-slate-500">{message}</p>
+            </div>
+            <Link
+              to="/login"
+              className="flex h-14 w-full items-center justify-center rounded-2xl bg-blue-600 text-lg font-bold text-white transition-all hover:bg-blue-700"
+            >
+              Login
+            </Link>
           </div>
         )}
 

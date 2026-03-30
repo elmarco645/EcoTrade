@@ -21,8 +21,12 @@ export default function ForgotPassword() {
       setMessage('Password reset email sent! Please check your inbox.');
     } catch (err: any) {
       console.error('Password reset error:', err);
-      if (err.code === 'auth/user-not-found') {
+      if (err.code === 'auth/operation-not-allowed') {
+        setError('Password reset is not enabled. Please contact support or check Firebase Console.');
+      } else if (err.code === 'auth/user-not-found') {
         setError('No account found with this email.');
+      } else if (err.code === 'auth/too-many-requests') {
+        setError('Too many requests. Please try again later.');
       } else {
         setError(err.message || 'Something went wrong. Please try again.');
       }

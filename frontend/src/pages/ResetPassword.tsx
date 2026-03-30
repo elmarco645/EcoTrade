@@ -49,7 +49,17 @@ export default function ResetPassword() {
       setSuccess(true);
     } catch (err: any) {
       console.error('Reset password error:', err);
-      setError(err.message || 'Something went wrong. Please try again.');
+      if (err.code === 'auth/operation-not-allowed') {
+        setError('Password reset is not enabled. Please contact support or check Firebase Console.');
+      } else if (err.code === 'auth/expired-action-code') {
+        setError('This password reset link has expired. Please request a new one.');
+      } else if (err.code === 'auth/invalid-action-code') {
+        setError('This password reset link is invalid. Please request a new one.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('Password is too weak. Please use a stronger password.');
+      } else {
+        setError(err.message || 'Something went wrong. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

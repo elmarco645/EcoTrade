@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import 'dotenv/config';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
@@ -13,6 +14,7 @@ import fs from 'fs';
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import admin from 'firebase-admin';
+import { getFirestore } from 'firebase-admin/firestore';
 
 import firebaseConfig from '../firebase-applet-config.json' assert { type: 'json' };
 
@@ -21,16 +23,38 @@ if (!admin) {
   console.error('[SERVER] Firebase Admin module not found');
 } else {
   try {
-    const projectId = firebaseConfig.projectId;
+    const projectId = process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY;
     const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     
+    console.log(`[SERVER] Project ID: ${projectId}`);
+    console.log(`[SERVER] Client Email: ${clientEmail ? 'SET' : 'NOT SET'}`);
+    console.log(`[SERVER] Private Key: ${privateKey ? 'SET' : 'NOT SET'}`);
+    console.log(`[SERVER] Credentials Path: ${credentialsPath}`);
+
     const config: any = {
       projectId: projectId,
     };
 
-    if (credentialsPath && fs.existsSync(credentialsPath)) {
+    if (clientEmail && privateKey) {
+      config.credential = admin.credential.cert({
+        projectId: projectId,
+        clientEmail: clientEmail,
+        privateKey: privateKey.replace(/\\n/g, '\n'),
+      });
+      console.log('[SERVER] Using service account credentials from environment variables');
+    } else if (credentialsPath && fs.existsSync(credentialsPath)) {
       config.credential = admin.credential.cert(credentialsPath);
       console.log(`[SERVER] Using service account key from: ${credentialsPath}`);
+    } else {
+      try {
+        config.credential = admin.credential.applicationDefault();
+        console.log('[SERVER] Using Application Default Credentials (ADC)');
+      } catch (adcError) {
+        console.warn('[SERVER] No Firebase Admin credentials found (env or file) and ADC failed. Some features may not work.');
+        console.error('[SERVER] ADC Error:', adcError);
+      }
     }
 
     if (!admin.apps.length) {
@@ -42,20 +66,13 @@ if (!admin) {
   }
 }
 
-const firestore = admin.firestore();
-if (firebaseConfig.firestoreDatabaseId) {
-  // If a specific database ID is provided, we should use it.
-  // However, the standard admin.firestore() uses the default database.
-  // For named databases, we might need a different approach depending on the SDK version.
-  // In newer versions, you can pass the databaseId to the firestore() call.
-  try {
-    // @ts-ignore
-    const db = admin.firestore(firebaseConfig.firestoreDatabaseId);
-    console.log(`[SERVER] Using named Firestore database: ${firebaseConfig.firestoreDatabaseId}`);
-  } catch (e) {
-    console.warn(`[SERVER] Could not initialize named Firestore database, falling back to default.`);
-  }
-}
+// Use environment variable for database ID if available, otherwise fallback to config or (default)
+// If FIREBASE_PROJECT_ID is set, we assume the user is using their own project and likely the (default) database
+const databaseId = process.env.FIREBASE_DATABASE_ID || 
+                  (process.env.FIREBASE_PROJECT_ID ? '(default)' : (firebaseConfig.firestoreDatabaseId || '(default)'));
+
+const firestore = getFirestore(admin.app(), databaseId);
+console.log(`[SERVER] Firestore initialized for database: ${databaseId}`);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET;
@@ -276,6 +293,26 @@ async function startServer() {
   // API routes
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', time: new Date().toISOString() });
+  });
+
+  app.get('/api/health', async (req, res) => {
+    let firestoreStatus = 'unknown';
+    try {
+      await firestore.collection('listings').limit(1).get();
+      firestoreStatus = 'connected';
+    } catch (err: any) {
+      firestoreStatus = `error: ${err.message}`;
+    }
+
+    res.json({ 
+      status: 'ok',
+      firebase: {
+        initialized: admin.apps.length > 0,
+        projectId: admin.app().options.projectId,
+        databaseId: databaseId,
+        firestore: firestoreStatus
+      }
+    });
   });
 
   // --- Auth Routes ---
@@ -977,6 +1014,8 @@ async function startServer() {
   app.get('/api/listings', async (req, res) => {
     try {
       console.log('[API] Fetching all listings...');
+      console.log(`[API] Using Firestore project: ${admin.app().options.projectId}`);
+      console.log(`[API] Using Firestore database: ${databaseId}`);
       const listingsSnapshot = await firestore.collection('listings')
         .where('status', '!=', 'sold')
         .orderBy('status')
@@ -1000,7 +1039,13 @@ async function startServer() {
       res.json(listings);
     } catch (error: any) {
       console.error('[API ERROR] Failed to fetch listings:', error);
-      res.status(500).json({ error: 'Failed to fetch listings' });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isAuthError = errorMessage.includes('UNAUTHENTICATED') || errorMessage.includes('permission_denied');
+      res.status(500).json({ 
+        error: 'Failed to fetch listings',
+        details: isAuthError ? 'Authentication error. Please check backend credentials and Firestore database ID.' : errorMessage,
+        code: error.code || 'unknown'
+      });
     }
   });
 

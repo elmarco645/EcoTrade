@@ -51,21 +51,19 @@ export default function App() {
         const token = await firebaseUser.getIdToken();
         localStorage.setItem('token', token);
         
-        // Fetch latest profile data from our backend using Firebase token
-        fetch('/api/user/profile', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        .then(res => {
-          if (res.ok) return res.json();
-          throw new Error('Session expired');
-        })
-        .then(data => {
-          setUser(data);
-          localStorage.setItem('user', JSON.stringify(data));
-        })
-        .catch(() => {
-          handleLogout();
-        });
+        // Use Firebase user directly as requested (no database)
+        const userData = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0],
+          avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+          emailVerified: firebaseUser.emailVerified,
+          username: firebaseUser.displayName?.toLowerCase().replace(/\s/g, '') || firebaseUser.email?.split('@')[0],
+          wallet_balance: 0,
+          role: 'user'
+        };
+        setUser(userData);
+        localStorage.setItem('user', JSON.stringify(userData));
       } else {
         setUser(null);
         localStorage.removeItem('token');

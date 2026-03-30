@@ -6,32 +6,21 @@ import { createUserWithEmailAndPassword, sendEmailVerification } from 'firebase/
 import { auth } from '../firebase';
 
 export default function Register({ setUser }: { setUser: (user: any) => void }) {
-  const [name, setName] = useState('');
-  const [username, setUsername] = useState('');
   const [email, setEmail] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('email') || '';
   });
-  const [phone, setPhone] = useState('');
-  const [avatar, setAvatar] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [showLoginInstead, setShowLoginInstead] = useState(false);
   const navigate = useNavigate();
 
-  const siteKey = (import.meta as any).env.VITE_RECAPTCHA_SITE_KEY;
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (siteKey && !captchaToken) {
-      setError('Please complete the CAPTCHA');
-      return;
-    }
     if (password !== confirmPassword) {
       setError('Passwords do not match');
       return;
@@ -50,64 +39,34 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
 
-      // 2. Get ID token to send to our backend
-      const token = await firebaseUser.getIdToken();
+      // 2. Send verification email
+      try {
+        const actionCodeSettings = {
+          url: `${window.location.origin}/verify-email`,
+          handleCodeInApp: true,
+        };
+        await sendEmailVerification(firebaseUser, actionCodeSettings);
+      } catch (emailErr: any) {
+        console.error('Email verification error:', emailErr);
+      }
 
-      // 3. Create user in our local database
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ name, username, email, phone, avatar, captchaToken }),
-      });
+      // 3. IMPORTANT: Sign out immediately as requested
+      await auth.signOut();
+
+      // 4. Redirect to verification screen
+      navigate(`/verify-email?email=${encodeURIComponent(email)}`);
       
-      let data;
-      const contentType = res.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        data = await res.json();
-      } else {
-        const text = await res.text();
-        console.error('Non-JSON response:', text);
-        throw new Error('Server returned an invalid response. Please try again later.');
-      }
-
-      if (res.ok) {
-        // 4. Send verification email AFTER local registration succeeds
-        try {
-          const actionCodeSettings = {
-            url: `${window.location.origin}/verify-email`,
-            handleCodeInApp: true,
-          };
-          await sendEmailVerification(firebaseUser, actionCodeSettings);
-          setSuccess('Signup successful! A verification email has been sent to ' + email + '. Please check your inbox.');
-        } catch (emailErr: any) {
-          console.error('Email verification error:', emailErr);
-          if (emailErr.code === 'auth/unauthorized-continue-uri') {
-            setSuccess('Signup successful! However, we couldn\'t send a verification email because this domain is not whitelisted in Firebase. Please add ' + window.location.origin + ' to Authorized Domains in Firebase Console.');
-          } else {
-            setSuccess('Signup successful! However, we couldn\'t send a verification email right now. Please try to login to resend it.');
-          }
-        }
-        // Clear form
-        setName('');
-        setUsername('');
-        setEmail('');
-        setPassword('');
-        setConfirmPassword('');
-        setCaptchaToken(null);
-      } else {
-        setError(data.message || data.error);
-        if (data.action === 'LOGIN_INSTEAD') {
-          setShowLoginInstead(true);
-        }
-      }
     } catch (err: any) {
       console.error('Registration error:', err);
-      if (err.code === 'auth/email-already-in-use') {
+      if (err.code === 'auth/operation-not-allowed') {
+        setError('Registration method is not enabled. Please contact support or check Firebase Console.');
+      } else if (err.code === 'auth/email-already-in-use') {
         setError('This email is already registered. Please login instead.');
         setShowLoginInstead(true);
+      } else if (err.code === 'auth/weak-password') {
+        setError('Password is too weak. Please use a stronger password.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Invalid email format.');
       } else {
         setError(err.message || 'Something went wrong. Please try again.');
       }
@@ -188,28 +147,6 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
           )}
           <div className="space-y-4">
             <div className="relative">
-              <User className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Full Name"
-                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
-              />
-            </div>
-            <div className="relative">
-              <AtSign className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                required
-                value={username}
-                onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s/g, ''))}
-                placeholder="Username"
-                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
-              />
-            </div>
-            <div className="relative">
               <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
               <input
                 type="email"
@@ -217,26 +154,6 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Email address"
-                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
-              />
-            </div>
-            <div className="relative">
-              <Phone className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Phone Number (optional)"
-                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
-              />
-            </div>
-            <div className="relative">
-              <Image className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-              <input
-                type="url"
-                value={avatar}
-                onChange={(e) => setAvatar(e.target.value)}
-                placeholder="Avatar URL (optional)"
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
               />
             </div>
@@ -311,22 +228,9 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
             )}
           </div>
 
-          {siteKey ? (
-            <div className="flex justify-center">
-              <ReCAPTCHA
-                sitekey={siteKey}
-                onChange={(token) => setCaptchaToken(token)}
-              />
-            </div>
-          ) : (
-            <div className="rounded-xl bg-amber-50 p-4 text-xs text-amber-600">
-              reCAPTCHA is not configured. Please add VITE_RECAPTCHA_SITE_KEY to your environment variables.
-            </div>
-          )}
-
           <button
             type="submit"
-            disabled={loading || (siteKey && !captchaToken)}
+            disabled={loading}
             className="flex h-14 w-full items-center justify-center rounded-2xl bg-blue-600 text-lg font-bold text-white transition-all hover:bg-blue-700 disabled:opacity-50"
           >
             {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : 'Create Account'}
