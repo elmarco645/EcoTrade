@@ -11,14 +11,22 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
     return params.get('email') || '';
   });
   const [password, setPassword] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
+  const siteKey = (import.meta as any).env.VITE_RECAPTCHA_SITE_KEY;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (siteKey && !captchaToken) {
+      setError('Please complete the CAPTCHA');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
@@ -125,6 +133,19 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
               </button>
             </div>
           </div>
+
+          {siteKey ? (
+            <div className="flex justify-center py-2">
+              <ReCAPTCHA
+                sitekey={siteKey}
+                onChange={(token) => setCaptchaToken(token)}
+              />
+            </div>
+          ) : (
+            <div className="rounded-xl bg-amber-50 p-3 text-[10px] text-amber-600 border border-amber-100">
+              reCAPTCHA is not configured. Please add VITE_RECAPTCHA_SITE_KEY to your environment variables.
+            </div>
+          )}
 
           <div className="flex justify-end">
             <Link to="/forgot-password" title="Forgot password" className="text-sm font-medium text-blue-600 hover:text-blue-700">

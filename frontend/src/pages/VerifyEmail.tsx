@@ -27,11 +27,11 @@ export default function VerifyEmail() {
       try {
         await applyActionCode(auth, oobCode);
         setStatus('success');
-        setMessage('Your email has been verified successfully!');
+        setMessage('Email verified successfully! You can now log in.');
       } catch (err: any) {
         console.error('Verification error:', err);
         setStatus('error');
-        setMessage(err.message || 'Something went wrong. Please try again.');
+        setMessage('Verification failed or link expired. Please request a new one.');
       }
     };
 

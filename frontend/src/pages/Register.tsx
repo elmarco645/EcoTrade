@@ -12,12 +12,15 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
   });
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [showLoginInstead, setShowLoginInstead] = useState(false);
   const navigate = useNavigate();
+
+  const siteKey = (import.meta as any).env.VITE_RECAPTCHA_SITE_KEY;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,6 +30,10 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
     }
     if (password.length < 8) {
       setError('Password must be at least 8 characters');
+      return;
+    }
+    if (siteKey && !captchaToken) {
+      setError('Please complete the CAPTCHA');
       return;
     }
     setLoading(true);
@@ -225,6 +232,19 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
             </div>
             {confirmPassword && password !== confirmPassword && (
               <p className="text-xs font-medium text-red-500 ml-2">Passwords do not match</p>
+            )}
+
+            {siteKey ? (
+              <div className="flex justify-center py-2">
+                <ReCAPTCHA
+                  sitekey={siteKey}
+                  onChange={(token) => setCaptchaToken(token)}
+                />
+              </div>
+            ) : (
+              <div className="rounded-xl bg-amber-50 p-3 text-[10px] text-amber-600 border border-amber-100">
+                reCAPTCHA is not configured. Please add VITE_RECAPTCHA_SITE_KEY to your environment variables.
+              </div>
             )}
           </div>
 

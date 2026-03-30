@@ -23,16 +23,16 @@ if (!admin) {
   console.error('[SERVER] Firebase Admin module not found');
 } else {
   try {
-    const projectId = process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+    const projectId = process.env.FIREBASE_PROJECT_ID || 
+                      process.env.GOOGLE_CLOUD_PROJECT || 
+                      process.env.GCLOUD_PROJECT || 
+                      firebaseConfig.projectId;
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
     const privateKey = process.env.FIREBASE_PRIVATE_KEY;
     const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     
-    console.log(`[SERVER] Project ID: ${projectId}`);
-    console.log(`[SERVER] Client Email: ${clientEmail ? 'SET' : 'NOT SET'}`);
-    console.log(`[SERVER] Private Key: ${privateKey ? 'SET' : 'NOT SET'}`);
-    console.log(`[SERVER] Credentials Path: ${credentialsPath}`);
-
+    console.log(`[SERVER] Initializing with Project ID: ${projectId}`);
+    
     const config: any = {
       projectId: projectId,
     };
@@ -48,31 +48,25 @@ if (!admin) {
       config.credential = admin.credential.cert(credentialsPath);
       console.log(`[SERVER] Using service account key from: ${credentialsPath}`);
     } else {
-      try {
-        config.credential = admin.credential.applicationDefault();
-        console.log('[SERVER] Using Application Default Credentials (ADC)');
-      } catch (adcError) {
-        console.warn('[SERVER] No Firebase Admin credentials found (env or file) and ADC failed. Some features may not work.');
-        console.error('[SERVER] ADC Error:', adcError);
-      }
+      // In AI Studio / Cloud Run, ADC should be the default
+      console.log('[SERVER] No explicit credentials found, attempting Application Default Credentials (ADC)');
     }
 
     if (!admin.apps.length) {
       admin.initializeApp(config);
     }
-    console.log(`[SERVER] Firebase Admin initialized successfully for project: ${projectId}`);
+    console.log(`[SERVER] Firebase Admin initialized for project: ${projectId}`);
   } catch (error) {
     console.error('[SERVER] Failed to initialize Firebase Admin:', error);
   }
 }
 
 // Use environment variable for database ID if available, otherwise fallback to config or (default)
-// If FIREBASE_PROJECT_ID is set, we assume the user is using their own project and likely the (default) database
 const databaseId = process.env.FIREBASE_DATABASE_ID || 
                   (process.env.FIREBASE_PROJECT_ID ? '(default)' : (firebaseConfig.firestoreDatabaseId || '(default)'));
 
 const firestore = getFirestore(admin.app(), databaseId);
-console.log(`[SERVER] Firestore initialized for database: ${databaseId}`);
+console.log(`[SERVER] Firestore initialized for database: ${databaseId} in project: ${admin.app().options.projectId}`);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET;
@@ -180,28 +174,6 @@ async function startServer() {
 
   // --- Rate Limiting Configuration ---
 
-  // Shared key generator to handle proxy headers
-  const keyGenerator = (req: any) => {
-    const forwarded = req.headers["forwarded"];
-    const xForwardedFor = req.headers["x-forwarded-for"];
-
-    if (forwarded) {
-      const match = forwarded.match(/for=([^;]+)/);
-      if (match) return match[1];
-    }
-
-    if (xForwardedFor) {
-      return xForwardedFor.split(",")[0].trim();
-    }
-
-    return req.ip;
-  };
-
-  const commonValidate = {
-    xForwardedForHeader: false, // Handled by app.set('trust proxy', 1)
-    forwardedHeader: false, // Handled by custom keyGenerator
-  };
-
   // 1. General API Limiter (100 requests per 15 mins)
   const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -209,8 +181,7 @@ async function startServer() {
     message: { error: 'Too many requests, please try again later' },
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator,
-    validate: commonValidate,
+    validate: { xForwardedForHeader: false },
   });
 
   // 2. Authentication Limiter (Stricter: 10 requests per 15 mins)
@@ -220,8 +191,7 @@ async function startServer() {
     message: { error: 'Too many authentication attempts, please try again later' },
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator,
-    validate: commonValidate,
+    validate: { xForwardedForHeader: false },
   });
 
   // 3. Sensitive Action Limiter (Medium: 20 requests per 15 mins)
@@ -232,8 +202,7 @@ async function startServer() {
     message: { error: 'Too many actions performed, please slow down' },
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator,
-    validate: commonValidate,
+    validate: { xForwardedForHeader: false },
   });
 
   // Apply general limiter to all API routes
