@@ -151,6 +151,33 @@ const sendDeleteUndoEmail = async (email: string, token: string, origin: string)
   }
 };
 
+const sendEmailChangeVerificationEmail = async (email: string, token: string, origin: string) => {
+  if (!EMAIL_USER || !EMAIL_PASS) {
+    console.warn('Email credentials missing. Email change simulation only.');
+    console.log(`[EMAIL SIMULATION] Verify new email for ${email}: ${origin}/api/user/confirm-email-change?token=${token}`);
+    return;
+  }
+
+  const link = `${origin}/api/user/confirm-email-change?token=${token}`;
+
+  try {
+    await transporter.sendMail({
+      from: `"EcoTrade" <${EMAIL_USER}>`,
+      to: email,
+      subject: 'Verify Your New Email Address',
+      html: emailTemplate(
+        "Verify Your New Email Address",
+        "You requested to change your email address for EcoTrade. Please click the button below to verify this new email address.",
+        "Verify Email",
+        link
+      )
+    });
+    console.log(`Verification email sent to ${email}`);
+  } catch (error) {
+    console.error('Error sending verification email:', error);
+  }
+};
+
 const verifyCaptcha = async (token: string) => {
   if (!RECAPTCHA_SECRET) return true; // Skip if not configured for demo
   try {
@@ -1056,7 +1083,7 @@ async function startServer() {
       for (const id of ids) {
         const listingDoc = await firestore.collection('listings').doc(id).get();
         if (listingDoc.exists) {
-          const listing = { ...listingDoc.data(), id: listingDoc.id };
+          const listing = { ...listingDoc.data(), id: listingDoc.id } as any;
           if (listing.status === 'reserved') {
             // Check for pending transactions
             const pendingTxQuery = await firestore.collection('transactions')
@@ -1167,7 +1194,7 @@ async function startServer() {
         };
       }));
 
-      res.json(offers.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
+      res.json(offers.sort((a: any, b: any) => b.created_at.toDate() - a.created_at.toDate()));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1234,7 +1261,7 @@ async function startServer() {
         };
       }));
 
-      res.json(transactions.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
+      res.json(transactions.sort((a: any, b: any) => b.created_at.toDate() - a.created_at.toDate()));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1307,15 +1334,15 @@ async function startServer() {
   app.post('/api/transactions/checkout', authenticateToken, async (req: any, res) => {
     const { items, total, shipping_address } = req.body;
     try {
-      const availableItems = [];
-      const unavailableItems = [];
+      const availableItems: any[] = [];
+      const unavailableItems: any[] = [];
 
       for (const listing_id of items) {
         const listingRef = firestore.collection('listings').doc(listing_id);
         const listingDoc = await listingRef.get();
         
         if (listingDoc.exists) {
-          const listing = { ...listingDoc.data(), id: listingDoc.id };
+          const listing = { ...listingDoc.data(), id: listingDoc.id } as any;
           if (listing.status === 'reserved') {
             const pendingTxQuery = await firestore.collection('transactions')
               .where('listing_id', '==', listing_id)
@@ -1357,7 +1384,7 @@ async function startServer() {
       const shipping_fee_per_item = (total - subtotal) / availableItems.length;
 
       const transactionIds = await firestore.runTransaction(async (transaction) => {
-        const ids = [];
+        const ids: string[] = [];
         for (const listing of availableItems) {
           const newTxRef = firestore.collection('transactions').doc();
           transaction.set(newTxRef, {
@@ -1536,7 +1563,7 @@ async function startServer() {
       });
 
       for (const doc of uniqueDocs) {
-        const t = { ...doc.data(), id: doc.id };
+        const t = { ...doc.data(), id: doc.id } as any;
         
         // Join with listing and users
         const [listingDoc, sellerDoc, buyerDoc] = await Promise.all([
@@ -1716,9 +1743,9 @@ async function startServer() {
         .orderBy('created_at', 'desc')
         .get();
       
-      const reviews = [];
+      const reviews: any[] = [];
       for (const doc of reviewsSnap.docs) {
-        const r = { ...doc.data(), id: doc.id };
+        const r = { ...doc.data(), id: doc.id } as any;
         const buyerDoc = await firestore.collection('users').doc(r.buyer_id).get();
         reviews.push({
           ...r,
