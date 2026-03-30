@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
@@ -28,6 +28,14 @@ import Offers from './pages/Offers';
 import SearchResults from './pages/SearchResults';
 import PaymentSuccess from './pages/PaymentSuccess';
 import NotFound from './pages/NotFound';
+
+function NavigationLogger() {
+  const location = useLocation();
+  useEffect(() => {
+    console.log('[APP] Navigated to:', location.pathname);
+  }, [location]);
+  return null;
+}
 
 console.log('[APP] App.tsx module loaded');
 
@@ -114,6 +122,7 @@ export default function App() {
 
   return (
     <Router>
+      <NavigationLogger />
       <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
         <Navbar user={user} onLogout={handleLogout} cartCount={cart.length} />
         <Breadcrumbs user={user} />

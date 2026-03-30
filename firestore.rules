@@ -10,24 +10,43 @@ service cloud.firestore {
     // Document ID: userId (UID)
     // Fields:
     //   - uid: string (required, immutable)
-    //   - email: string (required)
-    //   - name: string (required)
-    //   - username: string
-    //   - role: string (buyer, seller, admin)
-    //   - wallet_balance: number
-    //   - rating: number
-    //   - created_at: timestamp
+    //   - email: string (required, immutable)
+    //   - name: string (required, max 100)
+    //   - avatar_url: string (optional, URL)
+    //   - cover_url: string (optional, URL)
+    //   - role: string (required, 'buyer', 'seller', 'admin')
+    //   - wallet_balance: number (default 0)
+    //   - rating: number (default 0)
+    //   - is_verified: bool
+    //   - is_seller_verified: bool
+    //   - created_at: timestamp (immutable)
     //
     // Collection: listings
     // Document ID: listingId
     // Fields:
-    //   - seller_id: string (required)
-    //   - title: string (required)
-    //   - price: number (required)
+    //   - seller_id: string (required, immutable)
+    //   - title: string (required, max 200)
+    //   - description: string (required, max 2000)
     //   - category: string (required)
-    //   - status: string (available, sold, delisted)
+    //   - condition: string (required)
+    //   - price: number (required, positive)
+    //   - is_negotiable: bool
+    //   - location: string (required)
+    //   - status: string ('available', 'reserved', 'sold')
+    //   - images: list (max 10 strings)
+    //   - created_at: timestamp
+    //   - updated_at: timestamp
     //
-    // [Other collections: transactions, offers, messages, reviews]
+    // Collection: transactions
+    // Document ID: transactionId
+    // Fields:
+    //   - listing_id: string (required, immutable)
+    //   - buyer_id: string (required, immutable)
+    //   - seller_id: string (required, immutable)
+    //   - amount: number (required, positive)
+    //   - status: string ('pending_payment', 'paid', 'shipped', 'delivered', 'completed', 'cancelled')
+    //   - escrow_status: string ('pending', 'held', 'released', 'refunded')
+    //   - created_at: timestamp
     //
     // ===============================================================
 
@@ -46,55 +65,159 @@ service cloud.firestore {
           (request.auth.token.email == "formgmr645@gmail.com" && request.auth.token.email_verified == true));
     }
 
+    function isRecent(timestamp) {
+      return timestamp > request.time - duration.value(300, 's') &&
+             timestamp < request.time + duration.value(300, 's');
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    // Domain Validators
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'email', 'name']) &&
-             data.uid is string && data.uid.size() > 0 &&
-             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100;
+      return hasRequiredFields(['uid', 'email', 'name', 'role']) &&
+             hasOnlyAllowedFields(['uid', 'email', 'name', 'role', 'avatar_url', 'cover_url', 'wallet_balance', 'rating', 'is_verified', 'is_seller_verified', 'created_at', 'updated_at', 'national_id_encrypted', 'deleted_at', 'delete_token', 'delete_expires', 'email_change_token', 'new_email', 'failed_attempts', 'lock_until']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 &&
+             data.email is string && isValidEmail(data.email) && data.email.size() <= 256 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.role in ['buyer', 'seller', 'admin'] &&
+             (!('avatar_url' in data) || (isValidUrl(data.avatar_url) && data.avatar_url.size() <= 1000)) &&
+             (!('cover_url' in data) || (isValidUrl(data.cover_url) && data.cover_url.size() <= 1000)) &&
+             (!('wallet_balance' in data) || data.wallet_balance is number) &&
+             (!('rating' in data) || (data.rating is number && data.rating >= 0 && data.rating <= 5));
     }
 
     function isValidListing(data) {
-      return data.keys().hasAll(['seller_id', 'title', 'price', 'category']) &&
-             data.seller_id is string &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+      return hasRequiredFields(['seller_id', 'title', 'price', 'category', 'status']) &&
+             hasOnlyAllowedFields(['seller_id', 'title', 'description', 'category', 'condition', 'price', 'is_negotiable', 'location', 'status', 'images', 'created_at', 'updated_at']) &&
+             data.seller_id is string && data.seller_id.size() <= 128 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
+             (!('category' in data) || (data.category is string && data.category.size() <= 100)) &&
+             (!('condition' in data) || (data.condition is string && data.condition.size() <= 100)) &&
              data.price is number && data.price >= 0 &&
-             data.category is string;
+             data.status in ['available', 'reserved', 'sold'] &&
+             (!('images' in data) || (data.images is list && data.images.size() <= 10)) &&
+             (!('location' in data) || (data.location is string && data.location.size() <= 200));
+    }
+
+    function isValidTransaction(data) {
+      return hasRequiredFields(['listing_id', 'buyer_id', 'seller_id', 'amount', 'status']) &&
+             hasOnlyAllowedFields(['listing_id', 'buyer_id', 'seller_id', 'amount', 'shipping_fee', 'total_amount', 'status', 'escrow_status', 'shipping_address', 'payment_reference', 'gateway_response', 'tracking_id', 'created_at', 'updated_at']) &&
+             data.listing_id is string && data.listing_id.size() <= 128 &&
+             data.buyer_id is string && data.buyer_id.size() <= 128 &&
+             data.seller_id is string && data.seller_id.size() <= 128 &&
+             data.amount is number && data.amount >= 0 &&
+             data.status in ['pending_payment', 'paid', 'shipped', 'delivered', 'completed', 'cancelled'];
+    }
+
+    function isValidOffer(data) {
+      return hasRequiredFields(['listing_id', 'buyer_id', 'seller_id', 'amount', 'status']) &&
+             hasOnlyAllowedFields(['listing_id', 'buyer_id', 'seller_id', 'amount', 'status', 'expires_at', 'created_at']) &&
+             data.amount is number && data.amount > 0 &&
+             data.status in ['pending', 'accepted', 'rejected', 'expired'];
     }
 
     // Rules
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'buyer' || isAdmin());
-      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin());
+      allow read: if isOwner(userId) || isAdmin();
+      
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == 'buyer' || isAdmin()) &&
+                    isRecent(request.resource.data.created_at);
+      
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == resource.data.role || isAdmin()) &&
+                    request.resource.data.uid == resource.data.uid &&
+                    request.resource.data.email == resource.data.email &&
+                    request.resource.data.created_at == resource.data.created_at;
     }
 
     match /listings/{listingId} {
-      allow read: if true; // Explicitly requested by user
-      allow create: if isAuthenticated() && isValidListing(request.resource.data) && request.resource.data.seller_id == request.auth.uid;
-      allow update: if isAuthenticated() && (request.auth.uid == resource.data.seller_id || isAdmin()) && isValidListing(request.resource.data);
-      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.seller_id || isAdmin());
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidListing(request.resource.data) && 
+                    request.resource.data.seller_id == request.auth.uid &&
+                    isRecent(request.resource.data.created_at);
+      allow update: if isAuthenticated() && (isOwner(resource.data.seller_id) || isAdmin()) && 
+                    isValidListing(request.resource.data) &&
+                    request.resource.data.seller_id == resource.data.seller_id &&
+                    request.resource.data.created_at == resource.data.created_at;
+      allow delete: if isAuthenticated() && (isOwner(resource.data.seller_id) || isAdmin());
     }
 
     match /transactions/{transactionId} {
-      allow read: if isAuthenticated() && (request.auth.uid == resource.data.buyer_id || request.auth.uid == resource.data.seller_id || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.buyer_id == request.auth.uid;
-      allow update: if isAuthenticated() && (request.auth.uid == resource.data.buyer_id || request.auth.uid == resource.data.seller_id || isAdmin());
+      allow read: if isAuthenticated() && (isOwner(resource.data.buyer_id) || isOwner(resource.data.seller_id) || isAdmin());
+      
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data) && 
+                    request.resource.data.buyer_id == request.auth.uid &&
+                    isRecent(request.resource.data.created_at);
+      
+      allow update: if isAuthenticated() && (isOwner(resource.data.buyer_id) || isOwner(resource.data.seller_id) || isAdmin()) &&
+                    isValidTransaction(request.resource.data) &&
+                    request.resource.data.listing_id == resource.data.listing_id &&
+                    request.resource.data.buyer_id == resource.data.buyer_id &&
+                    request.resource.data.seller_id == resource.data.seller_id &&
+                    request.resource.data.created_at == resource.data.created_at &&
+                    // State Transition Logic
+                    (
+                      // Seller can mark as shipped/delivered
+                      (isOwner(resource.data.seller_id) && request.resource.data.status in ['shipped', 'delivered', resource.data.status]) ||
+                      // Buyer can mark as completed/cancelled
+                      (isOwner(resource.data.buyer_id) && request.resource.data.status in ['completed', 'cancelled', resource.data.status]) ||
+                      isAdmin()
+                    );
     }
 
     match /offers/{offerId} {
-      allow read: if isAuthenticated() && (request.auth.uid == resource.data.buyer_id || request.auth.uid == resource.data.seller_id || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.buyer_id == request.auth.uid;
-      allow update: if isAuthenticated() && (request.auth.uid == resource.data.buyer_id || request.auth.uid == resource.data.seller_id || isAdmin());
+      allow read: if isAuthenticated() && (isOwner(resource.data.buyer_id) || isOwner(resource.data.seller_id) || isAdmin());
+      
+      allow create: if isAuthenticated() && isValidOffer(request.resource.data) && 
+                    request.resource.data.buyer_id == request.auth.uid &&
+                    isRecent(request.resource.data.created_at);
+      
+      allow update: if isAuthenticated() && (isOwner(resource.data.buyer_id) || isOwner(resource.data.seller_id) || isAdmin()) &&
+                    isValidOffer(request.resource.data) &&
+                    request.resource.data.listing_id == resource.data.listing_id &&
+                    request.resource.data.buyer_id == resource.data.buyer_id &&
+                    request.resource.data.seller_id == resource.data.seller_id &&
+                    request.resource.data.created_at == resource.data.created_at &&
+                    (
+                      // Only seller can accept/reject
+                      (isOwner(resource.data.seller_id) && request.resource.data.status in ['accepted', 'rejected', resource.data.status]) ||
+                      // Buyer can only update amount if pending
+                      (isOwner(resource.data.buyer_id) && resource.data.status == 'pending' && request.resource.data.status == 'pending') ||
+                      isAdmin()
+                    );
+      
+      allow delete: if isAuthenticated() && (isOwner(resource.data.buyer_id) || isAdmin());
     }
 
     match /messages/{messageId} {
-      allow read: if isAuthenticated() && (request.auth.uid == resource.data.sender_id || request.auth.uid == resource.data.receiver_id || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.sender_id == request.auth.uid;
+      allow read: if isAuthenticated() && (isOwner(resource.data.sender_id) || isOwner(resource.data.receiver_id) || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.sender_id == request.auth.uid &&
+                    request.resource.data.content is string && request.resource.data.content.size() <= 1000 &&
+                    isRecent(request.resource.data.created_at);
     }
 
     match /reviews/{reviewId} {
       allow read: if true;
-      allow create: if isAuthenticated() && request.resource.data.buyer_id == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.buyer_id == request.auth.uid &&
+                    request.resource.data.rating is number && request.resource.data.rating >= 1 && request.resource.data.rating <= 5 &&
+                    isRecent(request.resource.data.created_at);
     }
   }
 }
+

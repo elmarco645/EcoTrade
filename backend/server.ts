@@ -48,8 +48,12 @@ if (!admin) {
       config.credential = admin.credential.cert(credentialsPath);
       console.log(`[SERVER] Using service account key from: ${credentialsPath}`);
     } else {
-      // In AI Studio / Cloud Run, ADC should be the default
-      console.log('[SERVER] No explicit credentials found, attempting Application Default Credentials (ADC)');
+      try {
+        config.credential = admin.credential.applicationDefault();
+        console.log('[SERVER] Using Application Default Credentials (ADC)');
+      } catch (e) {
+        console.warn('[SERVER] No explicit credentials found, and ADC failed. Attempting initialization without explicit credentials.');
+      }
     }
 
     if (!admin.apps.length) {
@@ -181,7 +185,7 @@ async function startServer() {
     message: { error: 'Too many requests, please try again later' },
     standardHeaders: true,
     legacyHeaders: false,
-    validate: { xForwardedForHeader: false },
+    validate: { default: false },
   });
 
   // 2. Authentication Limiter (Stricter: 10 requests per 15 mins)
@@ -191,7 +195,7 @@ async function startServer() {
     message: { error: 'Too many authentication attempts, please try again later' },
     standardHeaders: true,
     legacyHeaders: false,
-    validate: { xForwardedForHeader: false },
+    validate: { default: false },
   });
 
   // 3. Sensitive Action Limiter (Medium: 20 requests per 15 mins)
@@ -202,7 +206,7 @@ async function startServer() {
     message: { error: 'Too many actions performed, please slow down' },
     standardHeaders: true,
     legacyHeaders: false,
-    validate: { xForwardedForHeader: false },
+    validate: { default: false },
   });
 
   // Apply general limiter to all API routes

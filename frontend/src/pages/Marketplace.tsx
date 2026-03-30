@@ -28,18 +28,34 @@ export default function Marketplace() {
     isNegotiable: false
   });
 
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     fetch('/api/listings')
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch listings');
+        return res.json();
+      })
       .then(data => {
-        setListings(data);
+        if (Array.isArray(data)) {
+          setListings(data);
+        } else if (data.error) {
+          setError(data.details || data.error);
+        } else {
+          setListings([]);
+        }
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Fetch error:', err);
+        setError(err.message);
         setLoading(false);
       });
   }, []);
 
-  const filteredListings = listings.filter(l => {
-    const matchesSearch = l.title.toLowerCase().includes(search.toLowerCase()) ||
-                         l.category.toLowerCase().includes(search.toLowerCase());
+  const filteredListings = Array.isArray(listings) ? listings.filter(l => {
+    const matchesSearch = (l.title || '').toLowerCase().includes(search.toLowerCase()) ||
+                         (l.category || '').toLowerCase().includes(search.toLowerCase());
     
     const matchesCategory = !filters.category || l.category === filters.category;
     const matchesCondition = !filters.condition || l.condition === filters.condition;
@@ -50,7 +66,7 @@ export default function Marketplace() {
 
     return matchesSearch && matchesCategory && matchesCondition && 
            matchesLocation && matchesMinPrice && matchesMaxPrice && matchesNegotiable;
-  });
+  }) : [];
 
   const resetFilters = () => {
     setFilters({
@@ -348,6 +364,20 @@ export default function Marketplace() {
                 <div className="h-4 w-1/3 rounded bg-slate-200" />
               </div>
             ))}
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="mb-4 rounded-full bg-red-100 p-6 text-red-600">
+              <ShieldCheck size={48} />
+            </div>
+            <h2 className="text-xl font-bold">Failed to load listings</h2>
+            <p className="max-w-md text-slate-500">{error}</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="mt-6 font-bold text-blue-600 hover:underline"
+            >
+              Try again
+            </button>
           </div>
         ) : filteredListings.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
