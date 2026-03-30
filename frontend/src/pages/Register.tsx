@@ -6,7 +6,10 @@ import ReCAPTCHA from 'react-google-recaptcha';
 export default function Register({ setUser }: { setUser: (user: any) => void }) {
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('email') || '';
+  });
   const [phone, setPhone] = useState('');
   const [avatar, setAvatar] = useState('');
   const [password, setPassword] = useState('');

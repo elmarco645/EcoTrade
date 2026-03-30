@@ -16,6 +16,7 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
   const [resendSuccess, setResendSuccess] = useState('');
   const [error, setError] = useState('');
   const [showResend, setShowResend] = useState(false);
+  const [showSignupAction, setShowSignupAction] = useState(false);
   const [unverifiedEmail, setUnverifiedEmail] = useState('');
   const navigate = useNavigate();
 
@@ -57,6 +58,7 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
     setLoading(true);
     setError('');
     setShowResend(false);
+    setShowSignupAction(false);
     setResendSuccess('');
 
     try {
@@ -74,10 +76,13 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
         setUser(data.user);
         navigate('/');
       } else {
-        setError(data.message || data.error);
+        setError(data.error || data.message);
         if (data.showResend) {
           setShowResend(true);
           setUnverifiedEmail(data.email);
+        }
+        if (data.action === 'SIGNUP') {
+          setShowSignupAction(true);
         }
       }
     } catch (err) {
@@ -111,6 +116,14 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
                 >
                   {resending ? 'Sending...' : 'Resend Verification Email'}
                 </button>
+              )}
+              {showSignupAction && (
+                <Link
+                  to={`/register?email=${encodeURIComponent(identifier)}`}
+                  className="mt-2 block w-full rounded-lg bg-blue-600 py-2 text-center text-xs font-bold text-white transition-all hover:bg-blue-700"
+                >
+                  Sign up for free
+                </Link>
               )}
             </div>
           )}
