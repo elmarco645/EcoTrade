@@ -1,16 +1,17 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
-import { createServer } from 'http';
+import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
 import bcrypt from 'bcryptjs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import axios from 'axios';
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import multer from 'multer';
-import fs from 'fs';
+import fs from 'node:fs';
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import admin from 'firebase-admin';
@@ -19,9 +20,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import firebaseConfig from '../firebase-applet-config.json' assert { type: 'json' };
 
 console.log('[SERVER] Initializing Firebase Admin...');
-if (!admin) {
-  console.error('[SERVER] Firebase Admin module not found');
-} else {
+if (admin) {
   try {
     const projectId = process.env.FIREBASE_PROJECT_ID || 
                       process.env.GOOGLE_CLOUD_PROJECT || 
@@ -82,6 +81,13 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
+
+// Detect input type (email, phone, or username)
+function detectInputType(input: string) {
+  if (input.includes("@")) return "email";
+  if (/^\+?\d{10,15}$/.test(input)) return "phone";
+  return "username";
+}
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -292,7 +298,7 @@ async function startServer() {
   app.post('/api/auth/register', async (req, res) => {
     const { email, name, username, phone, avatar, captchaToken } = req.body;
     const authHeader = req.headers['authorization'];
-    const firebaseToken = authHeader && authHeader.split(' ')[1];
+    const firebaseToken = authHeader?.split(' ')[1];
 
     try {
       // Verify CAPTCHA
@@ -367,16 +373,10 @@ async function startServer() {
     }
   });
 
-  function detectInputType(input: string) {
-    if (input.includes("@")) return "email";
-    if (/^\+?\d{10,15}$/.test(input)) return "phone";
-    return "username";
-  }
-
   app.post('/api/auth/login', async (req, res) => {
     const { captchaToken } = req.body;
     const authHeader = req.headers['authorization'];
-    const firebaseToken = authHeader && authHeader.split(' ')[1];
+    const firebaseToken = authHeader?.split(' ')[1];
 
     try {
       // Verify CAPTCHA
@@ -650,7 +650,7 @@ async function startServer() {
   // --- Middleware ---
   const authenticateToken = async (req: any, res: any, next: any) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const token = authHeader?.split(' ')[1];
     if (!token) return res.sendStatus(401);
 
     try {
@@ -990,13 +990,12 @@ async function startServer() {
       console.log(`[API] Using Firestore project: ${admin.app().options.projectId}`);
       console.log(`[API] Using Firestore database: ${databaseId}`);
       const listingsSnapshot = await firestore.collection('listings')
-        .where('status', '!=', 'sold')
-        .orderBy('status')
         .orderBy('created_at', 'desc')
         .get();
       
       const listings = await Promise.all(listingsSnapshot.docs.map(async (doc) => {
         const data = doc.data();
+        if (data.status === 'sold') return null;
         const sellerDoc = await firestore.collection('users').doc(data.seller_id).get();
         const sellerData = sellerDoc.data();
         return {
@@ -1006,7 +1005,7 @@ async function startServer() {
           seller_avatar: sellerData?.avatar_url || sellerData?.avatar,
           is_seller_verified: sellerData?.is_seller_verified
         };
-      }));
+      })).then(results => results.filter(Boolean));
 
       console.log(`[API] Found ${listings.length} listings`);
       res.json(listings);

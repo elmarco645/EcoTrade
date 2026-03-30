@@ -43,8 +43,11 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
 
     try {
       // 1. Create user in Firebase Auth
+      console.log('Attempting Firebase signup with:', { email, hasPassword: !!password });
+      console.log('Auth object:', auth);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
+      console.log('Firebase signup successful:', firebaseUser.uid);
 
       // 2. Send verification email
       try {
@@ -64,7 +67,11 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
       navigate(`/verify-email?email=${encodeURIComponent(email)}`);
       
     } catch (err: any) {
-      console.error('Registration error:', err);
+      console.error('Registration error details:', {
+        code: err.code,
+        message: err.message,
+        fullError: err,
+      });
       if (err.code === 'auth/operation-not-allowed') {
         setError('Registration method is not enabled. Please contact support or check Firebase Console.');
       } else if (err.code === 'auth/email-already-in-use') {
