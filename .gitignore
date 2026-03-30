@@ -7,4 +7,24 @@ coverage/
 .env*
 !.env.example
 
-ecotrade-*-firebase-adminsdk-*.json
+# Security: Never commit credentials or sensitive files
+*-firebase-adminsdk-*.json
+.hintrc
+firebase-key.json
+credentials.json
+secrets.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Misc
+.cache/
+.eslintcache/
+temp_mcp/

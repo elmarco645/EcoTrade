@@ -43,11 +43,8 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
 
     try {
       // 1. Create user in Firebase Auth
-      console.log('Attempting Firebase signup with:', { email, hasPassword: !!password });
-      console.log('Auth object:', auth);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
-      console.log('Firebase signup successful:', firebaseUser.uid);
 
       // 2. Send verification email
       try {
@@ -67,11 +64,7 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
       navigate(`/verify-email?email=${encodeURIComponent(email)}`);
       
     } catch (err: any) {
-      console.error('Registration error details:', {
-        code: err.code,
-        message: err.message,
-        fullError: err,
-      });
+      console.error('Registration error:', err);
       if (err.code === 'auth/operation-not-allowed') {
         setError('Registration method is not enabled. Please contact support or check Firebase Console.');
       } else if (err.code === 'auth/email-already-in-use') {
@@ -197,7 +190,8 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
                 </div>
                 <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                   <div 
-                    className={`h-full transition-all duration-500 ${strengthColor} ${['w-0', 'w-1/4', 'w-2/4', 'w-3/4', 'w-full'][strength]}`}
+                    className={`h-full transition-all duration-500 ${strengthColor}`}
+                    style={{ width: `${(strength / 4) * 100}%` }}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">

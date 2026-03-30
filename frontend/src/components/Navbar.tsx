@@ -30,12 +30,19 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
 
   useEffect(() => {
     if (searchQuery.trim().length > 1) {
-      const filtered = listings.filter(l => 
-        l.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        l.category.toLowerCase().includes(searchQuery.toLowerCase())
-      ).slice(0, 5);
-      setSuggestions(filtered);
-      setShowSuggestions(true);
+      try {
+        const filtered = listings.filter(l => {
+          if (!l || !l.title || !l.category) return false;
+          return l.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                 l.category.toLowerCase().includes(searchQuery.toLowerCase());
+        }).slice(0, 5);
+        setSuggestions(filtered);
+        setShowSuggestions(true);
+      } catch (err) {
+        console.error('[SEARCH] Error filtering suggestions:', err);
+        setSuggestions([]);
+        setShowSuggestions(false);
+      }
     } else {
       setSuggestions([]);
       setShowSuggestions(false);
@@ -104,34 +111,53 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
                 <X className="h-4 w-4" />
               </button>
             )}
-            {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
-                {suggestions.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => {
-                      navigate(`/listing/${item.id}`);
-                      setShowSuggestions(false);
-                      setIsMobileSearchOpen(false);
-                      setSearchQuery('');
-                    }}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
-                  >
-                    <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-100">
-                      <img
-                        src={JSON.parse(item.images || '[]')[0] || `https://picsum.photos/seed/${item.id}/100/100`}
-                        alt=""
-                        className="h-full w-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-slate-900 line-clamp-1">{item.title}</div>
-                      <div className="text-xs text-slate-500">{item.category} • ${item.price}</div>
-                    </div>
-                  </button>
-                ))}
+            {showSuggestions && Array.isArray(suggestions) && suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 z-[1000]">
+                {suggestions.map((item) => {
+                  if (!item || !item.id) return null;
+                  
+                  let imageUrl = `https://picsum.photos/seed/${item.id}/100/100`;
+                  try {
+                    const images = item.images ? JSON.parse(item.images) : [];
+                    if (Array.isArray(images) && images.length > 0) {
+                      imageUrl = images[0];
+                    }
+                  } catch (err) {
+                    console.warn('[SEARCH] Failed to parse images for item:', item.id, err);
+                  }
+                  
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        navigate(`/listing/${item.id}`);
+                        setShowSuggestions(false);
+                        setIsMobileSearchOpen(false);
+                        setSearchQuery('');
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-100">
+                        <img
+                          src={imageUrl}
+                          alt={item.title || 'Item'}
+                          className="h-full w-full object-cover"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            e.currentTarget.src = `https://picsum.photos/seed/${item.id}/100/100`;
+                          }}
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-bold text-slate-900 line-clamp-1">{item.title || 'Untitled'}</div>
+                        <div className="text-xs text-slate-500">
+                          {item.category || 'Other'} • ${item.price || '0'}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
                 <button
                   type="button"
                   onClick={handleSearch}

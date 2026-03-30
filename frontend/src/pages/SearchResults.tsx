@@ -19,6 +19,7 @@ export default function SearchResults() {
   
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   
   const [filters, setFilters] = useState({
@@ -32,28 +33,50 @@ export default function SearchResults() {
 
   useEffect(() => {
     setLoading(true);
+    setError(null);
     fetch('/api/listings')
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        return res.json();
+      })
       .then(data => {
-        setListings(data);
+        if (Array.isArray(data)) {
+          setListings(data);
+        } else {
+          console.warn('[SEARCH] API returned non-array data:', data);
+          setListings([]);
+        }
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('[SEARCH] Error fetching listings:', err);
+        setError('Failed to load listings');
+        setListings([]);
         setLoading(false);
       });
   }, []);
 
   const filteredListings = listings.filter(l => {
-    const matchesSearch = l.title.toLowerCase().includes(query.toLowerCase()) ||
-                         l.category.toLowerCase().includes(query.toLowerCase()) ||
-                         l.description.toLowerCase().includes(query.toLowerCase());
-    
-    const matchesCategory = !filters.category || l.category === filters.category;
-    const matchesCondition = !filters.condition || l.condition === filters.condition;
-    const matchesLocation = !filters.location || l.location === filters.location;
-    const matchesMinPrice = !filters.minPrice || l.price >= Number(filters.minPrice);
-    const matchesMaxPrice = !filters.maxPrice || l.price <= Number(filters.maxPrice);
-    const matchesNegotiable = !filters.isNegotiable || l.is_negotiable === 1;
+    try {
+      if (!l || !l.title || !l.category) return false;
+      
+      const matchesSearch = l.title.toLowerCase().includes(query.toLowerCase()) ||
+                           l.category.toLowerCase().includes(query.toLowerCase()) ||
+                           (l.description && l.description.toLowerCase().includes(query.toLowerCase()));
+      
+      const matchesCategory = !filters.category || l.category === filters.category;
+      const matchesCondition = !filters.condition || l.condition === filters.condition;
+      const matchesLocation = !filters.location || l.location === filters.location;
+      const matchesMinPrice = !filters.minPrice || (l.price && l.price >= Number(filters.minPrice));
+      const matchesMaxPrice = !filters.maxPrice || (l.price && l.price <= Number(filters.maxPrice));
+      const matchesNegotiable = !filters.isNegotiable || l.is_negotiable === 1;
 
-    return matchesSearch && matchesCategory && matchesCondition && 
-           matchesLocation && matchesMinPrice && matchesMaxPrice && matchesNegotiable;
+      return matchesSearch && matchesCategory && matchesCondition && 
+             matchesLocation && matchesMinPrice && matchesMaxPrice && matchesNegotiable;
+    } catch (err) {
+      console.error('[SEARCH] Error filtering listing:', l, err);
+      return false;
+    }
   });
 
   const resetFilters = () => {
@@ -82,7 +105,7 @@ export default function SearchResults() {
           </Link>
           <h1 className="text-3xl font-bold">Search Results</h1>
           <p className="text-slate-500">
-            {loading ? 'Searching...' : `Found ${filteredListings.length} results for "${query}"`}
+            {loading ? 'Searching...' : error ? 'Error loading results' : `Found ${filteredListings.length} results for "${query}"`}
           </p>
         </div>
         
@@ -99,6 +122,18 @@ export default function SearchResults() {
           )}
         </button>
       </div>
+
+      {error && (
+        <div className="rounded-2xl bg-red-50 p-6 border border-red-200">
+          <p className="text-sm text-red-700 font-medium">Error: {error}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="mt-4 text-xs font-bold text-red-600 hover:underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-col gap-8 lg:flex-row">
         {/* Sidebar Filters - Desktop */}
@@ -230,48 +265,65 @@ export default function SearchResults() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
-              {filteredListings.map((listing, idx) => (
-                <motion.div
-                  key={listing.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.05 }}
-                >
-                  <Link
-                    to={`/listing/${listing.id}`}
-                    className="group block space-y-4 rounded-[2rem] border border-transparent bg-white p-4 transition-all hover:border-slate-200 hover:shadow-xl"
+              {filteredListings.map((listing, idx) => {
+                if (!listing || !listing.id) return null;
+                
+                let imageUrl = `https://picsum.photos/seed/${listing.id}/400/400`;
+                try {
+                  const images = listing.images ? JSON.parse(listing.images) : [];
+                  if (Array.isArray(images) && images.length > 0) {
+                    imageUrl = images[0];
+                  }
+                } catch (err) {
+                  console.warn('[SEARCH] Failed to parse images for listing:', listing.id, err);
+                }
+                
+                return (
+                  <motion.div
+                    key={listing.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.05 }}
                   >
-                    <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-100">
-                      <img
-                        src={JSON.parse(listing.images || '[]')[0] || `https://picsum.photos/seed/${listing.id}/400/400`}
-                        alt={listing.title}
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-blue-600 backdrop-blur-sm">
-                        {listing.condition}
-                      </div>
-                    </div>
-                    <div className="space-y-1 px-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium uppercase tracking-wider text-slate-400">{listing.category}</span>
-                        <div className="flex items-center gap-1 text-xs font-bold text-amber-500">
-                          <Star className="h-3 w-3 fill-current" />
-                          {listing.seller_rating || 'New'}
+                    <Link
+                      to={`/listing/${listing.id}`}
+                      className="group block space-y-4 rounded-[2rem] border border-transparent bg-white p-4 transition-all hover:border-slate-200 hover:shadow-xl"
+                    >
+                      <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-100">
+                        <img
+                          src={imageUrl}
+                          alt={listing.title || 'Item'}
+                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            e.currentTarget.src = `https://picsum.photos/seed/${listing.id}/400/400`;
+                          }}
+                        />
+                        <div className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-blue-600 backdrop-blur-sm">
+                          {listing.condition || 'Used'}
                         </div>
                       </div>
-                      <h3 className="line-clamp-1 font-bold text-slate-900">{listing.title}</h3>
-                      <div className="flex items-center justify-between pt-2">
-                        <span className="text-lg font-black text-blue-600">${listing.price}</span>
-                        <div className="flex items-center gap-1 text-xs text-slate-400">
-                          <MapPin className="h-3 w-3" />
-                          {listing.location}
+                      <div className="space-y-1 px-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium uppercase tracking-wider text-slate-400">{listing.category || 'Other'}</span>
+                          <div className="flex items-center gap-1 text-xs font-bold text-amber-500">
+                            <Star className="h-3 w-3 fill-current" />
+                            {listing.seller_rating || 'New'}
+                          </div>
+                        </div>
+                        <h3 className="line-clamp-1 font-bold text-slate-900">{listing.title || 'Untitled'}</h3>
+                        <div className="flex items-center justify-between pt-2">
+                          <span className="text-lg font-black text-blue-600">${listing.price || '0'}</span>
+                          <div className="flex items-center gap-1 text-xs text-slate-400">
+                            <MapPin className="h-3 w-3" />
+                            {listing.location || 'N/A'}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </Link>
-                </motion.div>
-              ))}
+                    </Link>
+                  </motion.div>
+                );
+              })}
             </div>
           )}
         </div>
