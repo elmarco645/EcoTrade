@@ -8,6 +8,9 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, path.resolve(__dirname, '..'), '');
   return {
     plugins: [react(), tailwindcss()],
+    optimizeDeps: {
+      exclude: ['motion-dom'],
+    },
     build: {
       rollupOptions: {
         input: path.resolve(__dirname, 'index.html'),
