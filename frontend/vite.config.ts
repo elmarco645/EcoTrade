@@ -14,7 +14,11 @@ export default defineConfig(({mode}) => {
     build: {
       rollupOptions: {
         input: path.resolve(__dirname, 'index.html'),
+        external: ['motion-dom'],
       },
+    },
+    ssr: {
+      noExternal: [],
     },
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
