@@ -51,11 +51,22 @@ export default function App() {
     const handleError = (event: ErrorEvent) => {
       console.error('[GLOBAL ERROR]', event.error);
     };
-    globalThis.addEventListener('error', handleError);
+    window.addEventListener('error', handleError);
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log('[APP] Auth state changed:', firebaseUser ? 'User logged in' : 'No user');
       if (firebaseUser) {
+        // Force reload to get latest verification status
+        await firebaseUser.reload();
+        
+        if (!firebaseUser.emailVerified) {
+          console.log('[APP] User email not verified');
+          setUser(null);
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          return;
+        }
+
         const token = await firebaseUser.getIdToken();
         localStorage.setItem('token', token);
         

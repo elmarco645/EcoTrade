@@ -59,11 +59,23 @@ export default function VerifyEmail() {
               <h2 className="text-2xl font-bold">Check your inbox</h2>
               <p className="text-slate-500">{message}</p>
             </div>
+            
+            <div className="rounded-2xl bg-slate-50 p-6 text-sm text-slate-600">
+              <p className="font-medium text-slate-900 mb-2">Didn't receive the email?</p>
+              <p className="mb-4">Check your spam folder or click below to go to login and request a new link.</p>
+              <Link
+                to="/login"
+                className="inline-block font-bold text-blue-600 hover:text-blue-700 underline"
+              >
+                Go to Login to Resend
+              </Link>
+            </div>
+
             <Link
               to="/login"
               className="flex h-14 w-full items-center justify-center rounded-2xl bg-blue-600 text-lg font-bold text-white transition-all hover:bg-blue-700"
             >
-              Login
+              Back to Login
             </Link>
           </div>
         )}

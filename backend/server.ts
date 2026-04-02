@@ -1,17 +1,16 @@
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
-import { createServer } from 'node:http';
+import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
 import bcrypt from 'bcryptjs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import axios from 'axios';
-import crypto from 'node:crypto';
+import crypto from 'crypto';
 import multer from 'multer';
-import sharp from 'sharp';
-import fs from 'node:fs';
+import fs from 'fs';
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import admin from 'firebase-admin';
@@ -20,56 +19,46 @@ import { getFirestore } from 'firebase-admin/firestore';
 import firebaseConfig from '../firebase-applet-config.json' assert { type: 'json' };
 
 console.log('[SERVER] Initializing Firebase Admin...');
-if (admin) {
-  try {
-    const projectId = process.env.FIREBASE_PROJECT_ID || 
-                      process.env.GOOGLE_CLOUD_PROJECT || 
-                      process.env.GCLOUD_PROJECT || 
-                      firebaseConfig.projectId;
-    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY;
-    const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-    
-    console.log(`[SERVER] Initializing with Project ID: ${projectId}`);
-    
-    const config: any = {
-      projectId: projectId,
-    };
-
+try {
+  const projectId = process.env.FIREBASE_PROJECT_ID || 
+                    process.env.GOOGLE_CLOUD_PROJECT || 
+                    firebaseConfig.projectId;
+  
+  console.log(`[SERVER] Firebase Project ID: ${projectId}`);
+  
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+  
+  if (!admin.apps.length) {
     if (clientEmail && privateKey) {
-      config.credential = admin.credential.cert({
-        projectId: projectId,
-        clientEmail: clientEmail,
-        privateKey: privateKey.replaceAll('\\n', '\n'),
+      console.log('[SERVER] Firebase Admin: Using service account from environment variables');
+      const formattedKey = privateKey.replace(/\\n/g, '\n').replace(/^["']|["']$/g, '');
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId,
+          clientEmail,
+          privateKey: formattedKey,
+        }),
+        projectId
       });
-      console.log('[SERVER] Using service account credentials from environment variables');
-    } else if (credentialsPath && fs.existsSync(credentialsPath)) {
-      config.credential = admin.credential.cert(credentialsPath);
-      console.log(`[SERVER] Using service account key from: ${credentialsPath}`);
     } else {
-      try {
-        config.credential = admin.credential.applicationDefault();
-        console.log('[SERVER] Using Application Default Credentials (ADC)');
-      } catch (e) {
-        console.warn('[SERVER] No explicit credentials found, and ADC failed. Attempting initialization without explicit credentials.');
-        // Suppress error and continue
-      }
+      console.log('[SERVER] Firebase Admin: Using default initialization (ADC or Project ID)');
+      admin.initializeApp({
+        projectId
+      });
     }
-
-    if (!admin.apps.length) {
-      admin.initializeApp(config);
-    }
-    console.log(`[SERVER] Firebase Admin initialized for project: ${projectId}`);
-  } catch (error) {
-    console.error('[SERVER] Failed to initialize Firebase Admin:', error);
   }
-} else {
-  console.error('[SERVER] Firebase Admin module not found');
+  console.log(`[SERVER] Firebase Admin initialized for project: ${admin.app().options.projectId}`);
+} catch (error) {
+  console.error('[SERVER] Failed to initialize Firebase Admin:', error);
 }
 
 // Use environment variable for database ID if available, otherwise fallback to config or (default)
 const databaseId = process.env.FIREBASE_DATABASE_ID || 
-                  (process.env.FIREBASE_PROJECT_ID ? '(default)' : (firebaseConfig.firestoreDatabaseId || '(default)'));
+                  firebaseConfig.firestoreDatabaseId || 
+                  '(default)';
+
+console.log(`[SERVER] Firebase Database ID: ${databaseId}`);
 
 const firestore = getFirestore(admin.app(), databaseId);
 console.log(`[SERVER] Firestore initialized for database: ${databaseId} in project: ${admin.app().options.projectId}`);
@@ -165,12 +154,6 @@ const verifyCaptcha = async (token: string) => {
   }
 };
 
-function detectInputType(input: string): string {
-  if (input.includes("@")) return "email";
-  if (/^\+?\d{10,15}$/.test(input)) return "phone";
-  return "username";
-}
-
 async function startServer() {
   const app = express();
   app.set('trust proxy', 1);
@@ -243,9 +226,19 @@ async function startServer() {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
 
-  // Configure multer with memory storage for sharp processing
+  // Configure multer
+  const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+      cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
+  });
+
   const upload = multer({
-    storage: multer.memoryStorage(),
+    storage,
     limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
     fileFilter: (req, file, cb) => {
       if (file.mimetype.startsWith('image/')) {
@@ -286,7 +279,19 @@ async function startServer() {
 
   // --- Auth Routes ---
   app.post('/api/auth/register', async (req, res) => {
-    const { email, name, username, phone, avatar, captchaToken } = req.body;
+    const { 
+      email, 
+      name, 
+      username, 
+      phone, 
+      avatar, 
+      captchaToken,
+      firstName,
+      lastName,
+      dob,
+      addresses,
+      location
+    } = req.body;
     const authHeader = req.headers['authorization'];
     const firebaseToken = authHeader && authHeader.split(' ')[1];
 
@@ -337,18 +342,24 @@ async function startServer() {
       const userData = {
         uid,
         email,
-        name,
-        full_name: name,
+        name: name || `${firstName} ${lastName}`,
+        firstName: firstName || null,
+        lastName: lastName || null,
+        dob: dob || null,
+        addresses: addresses || [],
+        location: location || null,
+        full_name: name || `${firstName} ${lastName}`,
         username: username || null,
         phone: phone || null,
         avatar: avatar || null,
         role: 'buyer',
-        wallet_balance: 1000,
+        wallet_balance: 1000.0,
         rating: 0,
         is_verified: false,
         is_email_verified: true,
         is_seller_verified: false,
-        created_at: admin.firestore.FieldValue.serverTimestamp()
+        created_at: admin.firestore.FieldValue.serverTimestamp(),
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
       };
 
       await firestore.collection('users').doc(uid).set(userData);
@@ -362,6 +373,12 @@ async function startServer() {
       res.status(400).json({ error: error.message });
     }
   });
+
+  function detectInputType(input: string) {
+    if (input.includes("@")) return "email";
+    if (/^\+?\d{10,15}$/.test(input)) return "phone";
+    return "username";
+  }
 
   app.post('/api/auth/login', async (req, res) => {
     const { captchaToken } = req.body;
@@ -412,7 +429,7 @@ async function startServer() {
           email: user?.email, 
           name: user?.name, 
           username: user?.username,
-          avatar: user?.avatar ?? user?.avatar_url ?? "/default-avatar.png",
+          avatar: user?.avatar || user?.avatar_url || "/default-avatar.png",
           role: user?.role,
           wallet_balance: user?.wallet_balance,
           rating: user?.rating,
@@ -444,7 +461,11 @@ async function startServer() {
         return res.status(404).json({ error: 'Account not found' });
       }
       
-      const user = userQuery.docs[0].data();
+      const userDoc = userQuery.docs[0];
+      if (!userDoc) {
+        return res.status(404).json({ error: 'User document not found' });
+      }
+      const user = userDoc.data();
       res.json({ email: user.email });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -498,15 +519,19 @@ async function startServer() {
           const emailsRes = await axios.get('https://api.github.com/user/emails', {
             headers: { Authorization: `Bearer ${access_token}` }
           });
-          email = emailsRes.data.find((e: any) => e.primary && e.verified)?.email || emailsRes.data[0]?.email;
+          email = emailsRes.data?.find((e: any) => e.primary && e.verified)?.email || emailsRes.data?.[0]?.email;
+        }
+
+        if (!email) {
+          return res.status(400).send('Could not retrieve email from GitHub');
         }
 
         const userSnap = await firestore.collection('users').where('github_id', '==', githubUser.id.toString()).get();
         const emailSnap = await firestore.collection('users').where('email', '==', email.toLowerCase()).get();
 
-        if (!userSnap.empty) {
+        if (!userSnap.empty && userSnap.docs[0]) {
           user = { ...userSnap.docs[0].data(), id: userSnap.docs[0].id };
-        } else if (!emailSnap.empty) {
+        } else if (!emailSnap.empty && emailSnap.docs[0]) {
           user = { ...emailSnap.docs[0].data(), id: emailSnap.docs[0].id };
           await firestore.collection('users').doc(user.id).update({ github_id: githubUser.id.toString(), is_email_verified: true });
         } else {
@@ -745,7 +770,7 @@ async function startServer() {
       if (!token) return res.status(400).json({ error: 'Token is required' });
 
       const userSnap = await firestore.collection('users').where('email_change_token', '==', token).get();
-      if (userSnap.empty) {
+      if (userSnap.empty || !userSnap.docs[0]) {
         console.log(`[DEBUG] No user found for token: ${token}`);
         return res.status(400).json({ error: 'Invalid or expired token' });
       }
@@ -775,42 +800,22 @@ async function startServer() {
 
   app.post('/api/user/upload-avatar', authenticateToken, upload.single('avatar'), async (req: any, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const avatarUrl = `/uploads/${req.file.filename}`;
     try {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-      const filename = `avatar-${uniqueSuffix}.webp`;
-      const outputPath = path.join(__dirname, '../uploads', filename);
-
-      await sharp(req.file.buffer)
-        .resize(400, 400, { fit: 'cover' })
-        .webp({ quality: 80 })
-        .toFile(outputPath);
-
-      const avatarUrl = `/uploads/${filename}`;
       await firestore.collection('users').doc(req.user.id).update({ avatar_url: avatarUrl });
       res.json({ success: true, avatar_url: avatarUrl });
     } catch (error: any) {
-      console.error('[AVATAR UPLOAD ERROR]', error);
       res.status(500).json({ error: error.message });
     }
   });
 
   app.post('/api/user/upload-cover', authenticateToken, upload.single('cover'), async (req: any, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const coverUrl = `/uploads/${req.file.filename}`;
     try {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-      const filename = `cover-${uniqueSuffix}.webp`;
-      const outputPath = path.join(__dirname, '../uploads', filename);
-
-      await sharp(req.file.buffer)
-        .resize(1200, 400, { fit: 'cover', position: 'center' })
-        .webp({ quality: 80 })
-        .toFile(outputPath);
-
-      const coverUrl = `/uploads/${filename}`;
       await firestore.collection('users').doc(req.user.id).update({ cover_url: coverUrl });
       res.json({ success: true, cover_url: coverUrl });
     } catch (error: any) {
-      console.error('[COVER UPLOAD ERROR]', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -911,7 +916,7 @@ async function startServer() {
 
     try {
       const userQuery = await firestore.collection('users').where('delete_token', '==', token).get();
-      if (userQuery.empty) return res.status(400).json({ error: 'Invalid or expired token' });
+      if (userQuery.empty || !userQuery.docs[0]) return res.status(400).json({ error: 'Invalid or expired token' });
 
       const userDoc = userQuery.docs[0];
       const user = userDoc.data();
@@ -1051,7 +1056,7 @@ async function startServer() {
         description,
         category,
         condition,
-        price: Number.parseFloat(price),
+        price: parseFloat(price),
         is_negotiable: !!is_negotiable,
         location,
         images: images || [],
@@ -1084,7 +1089,7 @@ async function startServer() {
         listing_id,
         buyer_id: req.user.id,
         seller_id: listing?.seller_id,
-        amount: Number.parseFloat(amount),
+        amount: parseFloat(amount),
         status: 'pending',
         expires_at: admin.firestore.Timestamp.fromDate(expires_at),
         created_at: admin.firestore.FieldValue.serverTimestamp()
@@ -1120,7 +1125,7 @@ async function startServer() {
         };
       }));
 
-      res.json(offers.toSorted((a, b) => b.created_at.toDate() - a.created_at.toDate()));
+      res.json(offers.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1187,7 +1192,7 @@ async function startServer() {
         };
       }));
 
-      res.json(transactions.toSorted((a, b) => b.created_at.toDate() - a.created_at.toDate()));
+      res.json(transactions.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1771,7 +1776,7 @@ async function startServer() {
     app.get('*', (req, res) => res.sendFile(path.resolve(__dirname, '../frontend/dist/index.html')));
   }
 
-  httpServer.listen(3000, '0.0.0.0', async () => {
+  httpServer.listen(3000, '0.0.0.0', () => {
     console.log('Server running on http://localhost:3000');
     
     // Cleanup job for deleted accounts (runs every hour)
@@ -1812,9 +1817,7 @@ async function startServer() {
       const usersSnap = await firestore.collection('users').limit(1).get();
       if (usersSnap.empty) {
         console.log('Seeding sample data...');
-        // Use a default password from environment or generate a random one
-        const defaultPassword = process.env.SEED_PASSWORD || crypto.randomBytes(16).toString('hex');
-        const hashedPassword = bcrypt.hashSync(defaultPassword, 10);
+        const hashedPassword = bcrypt.hashSync('password123', 10);
         
         // Create users
         const user1Ref = firestore.collection('users').doc();
@@ -1823,7 +1826,7 @@ async function startServer() {
 
         await user1Ref.set({ email: 'alice@example.com', password: hashedPassword, name: 'Alice Green', username: 'alice', wallet_balance: 500, rating: 4.9, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
         await user2Ref.set({ email: 'bob@example.com', password: hashedPassword, name: 'Bob Smith', username: 'bob', wallet_balance: 1000, rating: 4.5, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
-        await user3Ref.set({ email: 'nefaryus@example.com', password: hashedPassword, name: 'Nefaryus', username: 'Nefaryus', wallet_balance: 1500, rating: 5, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
+        await user3Ref.set({ email: 'nefaryus@example.com', password: hashedPassword, name: 'Nefaryus', username: 'Nefaryus', wallet_balance: 1500, rating: 5.0, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
         
         // Create listings
         const listings = [
@@ -1849,9 +1852,7 @@ async function startServer() {
         }
       }
     };
-    seedData().catch(err => {
-      console.warn('[SEED] Failed to seed data:', err.message);
-    });
+    seedData().catch(console.error);
   });
 }
 

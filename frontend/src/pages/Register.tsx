@@ -1,9 +1,19 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, User, AtSign, Loader2, Eye, EyeOff, Check, X, Phone, Image } from 'lucide-react';
+import { Mail, Lock, User, AtSign, Loader2, Eye, EyeOff, Check, X, Phone, Calendar, MapPin, Plus, Trash2 } from 'lucide-react';
 import ReCAPTCHA from 'react-google-recaptcha';
 import { createUserWithEmailAndPassword, sendEmailVerification } from 'firebase/auth';
-import { auth } from '../firebase';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, db } from '../firebase';
+import LocationSelector from '../components/LocationSelector';
+
+interface Address {
+  isDefault: boolean;
+  county: string;
+  subcounty: string;
+  ward: string;
+  street: string;
+}
 
 export default function Register({ setUser }: { setUser: (user: any) => void }) {
   const [email, setEmail] = useState(() => {
@@ -12,6 +22,13 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
   });
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [dob, setDob] = useState('');
+  const [phone, setPhone] = useState('');
+  const [addresses, setAddresses] = useState<Address[]>([
+    { isDefault: true, county: '', subcounty: '', ward: '', street: '' }
+  ]);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -41,27 +58,87 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
     setSuccess('');
     setShowLoginInstead(false);
 
+    // Validate DOB
+    const dobRegex = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/;
+    if (!dobRegex.test(dob)) {
+      setError('Invalid Date of Birth format (DD/MM/YYYY)');
+      setLoading(false);
+      return;
+    }
+
+    // Convert DD/MM/YYYY to YYYY-MM-DD for database
+    const [d, m, y] = dob.split('/');
+    const formattedDob = `${y}-${m}-${d}`;
+
+    // Validate default address
+    const defaultAddr = addresses.find(a => a.isDefault);
+    if (!defaultAddr || !defaultAddr.county || !defaultAddr.subcounty || !defaultAddr.ward || !defaultAddr.street) {
+      setError('Please provide a complete default address');
+      setLoading(false);
+      return;
+    }
+
+    const locationString = `${defaultAddr.county}, ${defaultAddr.subcounty}`;
+
+    // Format phone
+    const formatPhone = (p: string) => {
+      if (p.startsWith('07')) return '+254' + p.slice(1);
+      if (p.startsWith('01')) return '+254' + p.slice(1);
+      if (p.startsWith('7')) return '+254' + p;
+      if (p.startsWith('1')) return '+254' + p;
+      return p;
+    };
+
+    const formattedPhone = formatPhone(phone);
+
     try {
       // 1. Create user in Firebase Auth
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
       const firebaseUser = userCredential.user;
 
-      // 2. Send verification email
+      // 2. Save user profile to Firestore
+      await setDoc(doc(db, 'users', firebaseUser.uid), {
+        uid: firebaseUser.uid,
+        firstName,
+        lastName,
+        name: `${firstName} ${lastName}`,
+        email: email.toLowerCase().trim(),
+        dob: formattedDob,
+        phone: formattedPhone,
+        whatsapp: formattedPhone,
+        addresses,
+        location: locationString,
+        role: 'buyer',
+        wallet_balance: 1000, // Initial balance
+        rating: 0,
+        is_seller_verified: false,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp()
+      });
+
+      // 3. Send verification email
+      let emailSent = false;
       try {
         const actionCodeSettings = {
           url: `${window.location.origin}/verify-email`,
           handleCodeInApp: true,
         };
         await sendEmailVerification(firebaseUser, actionCodeSettings);
+        emailSent = true;
       } catch (emailErr: any) {
         console.error('Email verification error:', emailErr);
+        // Don't block registration, but inform the user
       }
 
       // 3. IMPORTANT: Sign out immediately as requested
       await auth.signOut();
 
       // 4. Redirect to verification screen
-      navigate(`/verify-email?email=${encodeURIComponent(email)}`);
+      if (emailSent) {
+        navigate(`/verify-email?email=${encodeURIComponent(email)}`);
+      } else {
+        setError('Account created, but we couldn\'t send the verification email. Please try logging in to resend it.');
+      }
       
     } catch (err: any) {
       console.error('Registration error:', err);
@@ -153,6 +230,31 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
             </div>
           )}
           <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  required
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  placeholder="First Name"
+                  className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+                />
+              </div>
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  required
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  placeholder="Last Name"
+                  className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+                />
+              </div>
+            </div>
+
             <div className="relative">
               <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
               <input
@@ -164,6 +266,88 @@ export default function Register({ setUser }: { setUser: (user: any) => void }) 
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
               />
             </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="relative">
+                <Calendar className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  required
+                  value={dob}
+                  onChange={(e) => setDob(e.target.value)}
+                  placeholder="DOB (DD/MM/YYYY)"
+                  className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+                />
+              </div>
+              <div className="relative">
+                <Phone className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  required
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="Phone (WhatsApp)"
+                  className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-2">
+              <h3 className="text-sm font-bold text-slate-700 ml-1">Addresses</h3>
+              {addresses.map((addr, index) => (
+                <div key={index} className="space-y-3 rounded-3xl border border-slate-100 bg-slate-50/50 p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-500 ml-1">
+                      {addr.isDefault ? 'Default Address' : `Address ${index + 1}`}
+                    </span>
+                    {!addr.isDefault && (
+                      <button
+                        type="button"
+                        onClick={() => setAddresses(addresses.filter((_, i) => i !== index))}
+                        className="rounded-full p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600 transition-all"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  
+                  <LocationSelector
+                    initialLocation={addr}
+                    onChange={(loc) => {
+                      const newAddrs = [...addresses];
+                      newAddrs[index] = { ...newAddrs[index], ...loc };
+                      setAddresses(newAddrs);
+                    }}
+                  />
+
+                  <div className="relative">
+                    <MapPin className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      required
+                      value={addr.street}
+                      onChange={(e) => {
+                        const newAddrs = [...addresses];
+                        newAddrs[index].street = e.target.value;
+                        setAddresses(newAddrs);
+                      }}
+                      placeholder="Street Address"
+                      className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-4 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+                    />
+                  </div>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => setAddresses([...addresses, { isDefault: false, county: '', subcounty: '', ward: '', street: '' }])}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 py-3 text-sm font-bold text-slate-500 transition-all hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+              >
+                <Plus className="h-4 w-4" />
+                Add Another Address
+              </button>
+            </div>
+
             <div className="relative">
               <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
               <input

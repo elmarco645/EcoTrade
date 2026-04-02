@@ -3,6 +3,8 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { MapPin, ShieldCheck, MessageSquare, ShoppingCart, Star, ArrowLeft, Loader2, Tag, X, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
+import { getImages } from '../lib/imageUtils';
+
 export default function ListingDetail({ user, addToCart }: { user: any, addToCart: (item: any) => void }) {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -89,7 +91,7 @@ export default function ListingDetail({ user, addToCart }: { user: any, addToCar
   if (loading) return <div className="flex h-96 items-center justify-center"><Loader2 className="h-10 w-10 animate-spin text-blue-600" /></div>;
   if (!listing) return <div className="text-center">Listing not found.</div>;
 
-  const images = JSON.parse(listing.images || '[]');
+  const images = getImages(listing.images);
 
   return (
     <div className="mx-auto max-w-6xl space-y-8 pb-20">

@@ -88,12 +88,18 @@ service cloud.firestore {
 
     // Domain Validators
     function isValidUser(data) {
-      return hasRequiredFields(['uid', 'email', 'name', 'role']) &&
-             hasOnlyAllowedFields(['uid', 'email', 'name', 'role', 'avatar_url', 'cover_url', 'wallet_balance', 'rating', 'is_verified', 'is_seller_verified', 'created_at', 'updated_at', 'national_id_encrypted', 'deleted_at', 'delete_token', 'delete_expires', 'email_change_token', 'new_email', 'failed_attempts', 'lock_until']) &&
+      return hasRequiredFields(['uid', 'email', 'firstName', 'lastName', 'role']) &&
+             hasOnlyAllowedFields(['uid', 'email', 'firstName', 'lastName', 'name', 'role', 'dob', 'phone', 'whatsapp', 'addresses', 'location', 'avatar_url', 'cover_url', 'wallet_balance', 'rating', 'is_verified', 'is_seller_verified', 'created_at', 'updated_at', 'national_id_encrypted', 'deleted_at', 'delete_token', 'delete_expires', 'email_change_token', 'new_email', 'failed_attempts', 'lock_until']) &&
              data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 &&
              data.email is string && isValidEmail(data.email) && data.email.size() <= 256 &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.firstName is string && data.firstName.size() > 0 && data.firstName.size() <= 50 &&
+             data.lastName is string && data.lastName.size() > 0 && data.lastName.size() <= 50 &&
+             (!('name' in data) || (data.name is string && data.name.size() <= 100)) &&
              data.role in ['buyer', 'seller', 'admin'] &&
+             (!('dob' in data) || data.dob is string) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 20)) &&
+             (!('whatsapp' in data) || (data.whatsapp is string && data.whatsapp.size() <= 20)) &&
+             (!('addresses' in data) || (data.addresses is list && data.addresses.size() <= 5)) &&
              (!('avatar_url' in data) || (isValidUrl(data.avatar_url) && data.avatar_url.size() <= 1000)) &&
              (!('cover_url' in data) || (isValidUrl(data.cover_url) && data.cover_url.size() <= 1000)) &&
              (!('wallet_balance' in data) || data.wallet_balance is number) &&

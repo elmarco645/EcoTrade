@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { User as UserIcon, Lock, Loader2, Eye, EyeOff } from 'lucide-react';
+import { User as UserIcon, Lock, Loader2, ShieldCheck, Eye, EyeOff, Github, AlertCircle, CheckCircle2 } from 'lucide-react';
 import ReCAPTCHA from 'react-google-recaptcha';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../firebase';
+import { signInWithEmailAndPassword, signInWithCustomToken, sendEmailVerification, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase';
 
-export default function Login({ setUser }: readonly { readonly setUser: (user: any) => void }) {
+export default function Login({ setUser }: { setUser: (user: any) => void }) {
   const [email, setEmail] = useState(() => {
-    const params = new URLSearchParams(globalThis.location.search);
+    const params = new URLSearchParams(window.location.search);
     return params.get('email') || '';
   });
   const [password, setPassword] = useState('');
@@ -15,12 +16,41 @@ export default function Login({ setUser }: readonly { readonly setUser: (user: a
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [resending, setResending] = useState(false);
+  const [unverified, setUnverified] = useState(false);
   const navigate = useNavigate();
 
   const siteKey = (import.meta as any).env.VITE_RECAPTCHA_SITE_KEY;
 
-  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
+  const handleResendVerification = async () => {
+    const firebaseUser = auth.currentUser;
+    if (!firebaseUser) return;
+
+    setResending(true);
+    try {
+      const actionCodeSettings = {
+        url: `${window.location.origin}/verify-email`,
+        handleCodeInApp: true,
+      };
+      await sendEmailVerification(firebaseUser, actionCodeSettings);
+      setSuccess('Verification email resent! Please check your inbox.');
+      setUnverified(false);
+      // Now we can sign out since the email is sent
+      await signOut(auth);
+    } catch (err: any) {
+      console.error('Resend error:', err);
+      setError('Failed to resend verification email. Please try again later.');
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    setSuccess('');
+    setUnverified(false);
     
     if (siteKey && !captchaToken) {
       setError('Please complete the CAPTCHA');
@@ -30,9 +60,11 @@ export default function Login({ setUser }: readonly { readonly setUser: (user: a
     setLoading(true);
     setError('');
 
+    console.log("Attempting login with:", { email: email.trim(), password: password ? '********' : 'EMPTY' });
+
     try {
       // 1. Sign in with Firebase Auth
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
       const firebaseUser = userCredential.user;
 
       // Force reload to get the latest emailVerified status
@@ -40,42 +72,58 @@ export default function Login({ setUser }: readonly { readonly setUser: (user: a
 
       // Check if email is verified as requested by user
       if (!firebaseUser.emailVerified) {
-        // Sign out immediately
-        await auth.signOut();
-        // Redirect to verification screen
-        navigate(`/verify-email?email=${encodeURIComponent(email)}`);
+        setUnverified(true);
+        setError('Your email is not verified. Please check your inbox or click below to resend.');
+        setLoading(false);
         return;
       }
 
       const token = await firebaseUser.getIdToken();
       localStorage.setItem('token', token);
       
-      // Create a basic user object from Firebase Auth
-      const userData = {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email,
-        displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0],
-        avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-        emailVerified: firebaseUser.emailVerified,
-        username: firebaseUser.displayName?.toLowerCase().replaceAll(/\s/g, '') || firebaseUser.email?.split('@')[0],
-        wallet_balance: 0,
-        role: 'user'
-      };
-
-      localStorage.setItem('user', JSON.stringify(userData));
-      setUser(userData);
+      // 2. Fetch user profile from Firestore
+      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+      
+      if (!userDoc.exists()) {
+        console.warn('[LOGIN] Firestore profile not found for UID:', firebaseUser.uid);
+        // If profile doesn't exist, we might want to redirect to a "Complete Profile" page
+        // For now, we'll create a basic one so the app doesn't crash
+        const basicData = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0],
+          avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+          emailVerified: firebaseUser.emailVerified,
+          username: firebaseUser.displayName?.toLowerCase().replace(/\s/g, '') || firebaseUser.email?.split('@')[0],
+          wallet_balance: 0,
+          role: 'buyer'
+        };
+        localStorage.setItem('user', JSON.stringify(basicData));
+        setUser(basicData);
+      } else {
+        const dbUser = userDoc.data();
+        const userData = {
+          ...dbUser,
+          id: firebaseUser.uid,
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          emailVerified: firebaseUser.emailVerified,
+        };
+        localStorage.setItem('user', JSON.stringify(userData));
+        setUser(userData);
+      }
+      
       navigate('/');
     } catch (err: any) {
       console.error('Login error:', err);
-      console.log('Error code:', err.code);
-      console.log('Email:', email);
-      
       if (err.code === 'auth/operation-not-allowed') {
         setError('Login method is not enabled. Please contact support or check Firebase Console.');
-      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+      } else if (
+        err.code === 'auth/user-not-found' || 
+        err.code === 'auth/wrong-password' || 
+        err.code === 'auth/invalid-credential'
+      ) {
         setError('Email or password is incorrect');
-      } else if (err.code === 'auth/wrong-password') {
-        setError('Incorrect password');
       } else if (err.code === 'auth/invalid-email') {
         setError('Invalid email format');
       } else if (err.code === 'auth/too-many-requests') {
@@ -101,8 +149,28 @@ export default function Login({ setUser }: readonly { readonly setUser: (user: a
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           {error && (
-            <div className="rounded-xl bg-red-50 p-4 text-sm font-medium text-red-600">
-              {error}
+            <div className="flex items-start gap-3 rounded-2xl bg-red-50 p-4 text-sm text-red-600">
+              <AlertCircle className="h-5 w-5 shrink-0" />
+              <div className="space-y-2">
+                <p className="font-medium">{error}</p>
+                {unverified && (
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={resending}
+                    className="text-sm font-bold underline hover:text-red-700 disabled:opacity-50"
+                  >
+                    {resending ? 'Sending...' : 'Resend Verification Email'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {success && (
+            <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-600">
+              <CheckCircle2 className="h-5 w-5 shrink-0" />
+              <p className="font-medium">{success}</p>
             </div>
           )}
           <div className="space-y-4">

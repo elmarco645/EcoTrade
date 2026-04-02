@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, Truck, CheckCircle, AlertCircle, Star, Loader2, ExternalLink, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { getFirstImage } from '../lib/imageUtils';
 
 export default function Orders({ user }: { user: any }) {
   const navigate = useNavigate();
@@ -134,7 +135,7 @@ export default function Orders({ user }: { user: any }) {
               <div className="flex flex-col gap-6 p-6 md:flex-row">
                 <div className="h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-slate-100">
                   <img 
-                    src={JSON.parse(order.listing_images || '[]')[0] || `https://picsum.photos/seed/${order.listing_id}/200/200`} 
+                    src={getFirstImage(order.listing_images, order.listing_id)} 
                     alt="" 
                     className="h-full w-full object-cover"
                     referrerPolicy="no-referrer"

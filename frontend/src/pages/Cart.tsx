@@ -1,6 +1,7 @@
 import { useNavigate, Link } from 'react-router-dom';
 import { Trash2, ShoppingBag, ArrowRight, ShieldCheck, Truck, Loader2, AlertCircle } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
+import { getFirstImage } from '../lib/imageUtils';
 
 interface CartProps {
   cart: any[];
@@ -154,7 +155,7 @@ export default function Cart({ cart, removeFromCart, clearCart, user }: CartProp
               }`}>
                 <Link to={`/listing/${item.id}`} className="h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-slate-100">
                   <img 
-                    src={JSON.parse(item.images || '[]')[0] || `https://picsum.photos/seed/${item.id}/200/200`} 
+                    src={getFirstImage(item.images, item.id)} 
                     alt={item.title} 
                     className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
                     referrerPolicy="no-referrer"

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Filter, MapPin, Tag, Star, X, ChevronDown, Check, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { getFirstImage } from '../lib/imageUtils';
 
 const CATEGORIES = [
   'Electronics', 'Phones & Tablets', 'Computers & Laptops', 'Fashion', 
@@ -408,7 +409,7 @@ export default function Marketplace() {
                 >
                   <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-100">
                     <img
-                      src={JSON.parse(listing.images || '[]')[0] || `https://picsum.photos/seed/${listing.id}/400/400`}
+                      src={getFirstImage(listing.images, listing.id)}
                       alt={listing.title}
                       className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
                       referrerPolicy="no-referrer"

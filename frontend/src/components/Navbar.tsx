@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
+import { getFirstImage } from '../lib/imageUtils';
 import { Link, useNavigate } from 'react-router-dom';
 import { ShoppingBag, MessageSquare, Wallet, User, LogOut, Search, PlusCircle, ShoppingCart, X, ShieldCheck } from 'lucide-react';
 import LogoutConfirmModal from './LogoutConfirmModal';
 
 interface NavbarProps {
-  readonly user: any;
-  readonly onLogout: () => void;
-  readonly cartCount: number;
+  user: any;
+  onLogout: () => void;
+  cartCount: number;
 }
 
 export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
@@ -30,19 +31,12 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
 
   useEffect(() => {
     if (searchQuery.trim().length > 1) {
-      try {
-        const filtered = listings.filter(l => {
-          if (!l?.title || !l?.category) return false;
-          return l.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                 l.category.toLowerCase().includes(searchQuery.toLowerCase());
-        }).slice(0, 5);
-        setSuggestions(filtered);
-        setShowSuggestions(true);
-      } catch (err) {
-        console.error('[SEARCH] Error filtering suggestions:', err);
-        setSuggestions([]);
-        setShowSuggestions(false);
-      }
+      const filtered = listings.filter(l => 
+        l.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        l.category.toLowerCase().includes(searchQuery.toLowerCase())
+      ).slice(0, 5);
+      setSuggestions(filtered);
+      setShowSuggestions(true);
     } else {
       setSuggestions([]);
       setShowSuggestions(false);
@@ -107,58 +101,38 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
                 type="button"
                 onClick={() => setIsMobileSearchOpen(false)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 md:hidden"
-                title="Close search"
               >
                 <X className="h-4 w-4" />
               </button>
             )}
-            {showSuggestions && Array.isArray(suggestions) && suggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 z-[1000]">
-                {suggestions.map((item) => {
-                  if (!item?.id) return null;
-                  
-                  let imageUrl = `https://picsum.photos/seed/${item.id}/100/100`;
-                  try {
-                    const images = item.images ? JSON.parse(item.images) : [];
-                    if (Array.isArray(images) && images.length > 0) {
-                      imageUrl = images[0];
-                    }
-                  } catch (err) {
-                    console.warn('[SEARCH] Failed to parse images for item:', item.id, err);
-                  }
-                  
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => {
-                        navigate(`/listing/${item.id}`);
-                        setShowSuggestions(false);
-                        setIsMobileSearchOpen(false);
-                        setSearchQuery('');
-                      }}
-                      className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
-                    >
-                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-100">
-                        <img
-                          src={imageUrl}
-                          alt={item.title || 'Item'}
-                          className="h-full w-full object-cover"
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            e.currentTarget.src = `https://picsum.photos/seed/${item.id}/100/100`;
-                          }}
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-bold text-slate-900 line-clamp-1">{item.title || 'Untitled'}</div>
-                        <div className="text-xs text-slate-500">
-                          {item.category || 'Other'} • ${item.price || '0'}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
+                {suggestions.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      navigate(`/listing/${item.id}`);
+                      setShowSuggestions(false);
+                      setIsMobileSearchOpen(false);
+                      setSearchQuery('');
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
+                  >
+                    <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-100">
+                      <img
+                        src={getFirstImage(item.images, item.id)}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900 line-clamp-1">{item.title}</div>
+                      <div className="text-xs text-slate-500">{item.category} • ${item.price}</div>
+                    </div>
+                  </button>
+                ))}
                 <button
                   type="button"
                   onClick={handleSearch}
@@ -175,7 +149,6 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
           <button 
             onClick={() => setIsMobileSearchOpen(!isMobileSearchOpen)}
             className="flex h-10 w-10 items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 md:hidden"
-            title="Toggle search"
           >
             <Search className="h-5 w-5" />
           </button>
@@ -215,7 +188,6 @@ export default function Navbar({ user, onLogout, cartCount }: NavbarProps) {
                   className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border bg-white transition-all ${
                     isMenuOpen ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200 hover:border-blue-500'
                   }`}
-                  title="Open user menu"
                 >
                   {user.avatar ? (
                     <img 

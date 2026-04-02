@@ -7,7 +7,25 @@
       "properties": {
         "uid": { "type": "string", "description": "Firebase Auth UID" },
         "email": { "type": "string", "format": "email" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
         "name": { "type": "string" },
+        "dob": { "type": "string", "description": "Date of Birth (DD/MM/YYYY)" },
+        "phone": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "addresses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "isDefault": { "type": "boolean" },
+              "county": { "type": "string" },
+              "subcounty": { "type": "string" },
+              "ward": { "type": "string" },
+              "street": { "type": "string" }
+            }
+          }
+        },
         "avatar_url": { "type": "string" },
         "cover_url": { "type": "string" },
         "role": { "type": "string", "enum": ["buyer", "seller", "admin"] },
@@ -25,7 +43,7 @@
         "lock_until": { "type": "string", "format": "date-time" },
         "created_at": { "type": "string", "format": "date-time" }
       },
-      "required": ["uid", "email", "name"]
+      "required": ["uid", "email", "firstName", "lastName"]
     },
     "Listing": {
       "title": "Listing",
