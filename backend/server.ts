@@ -1,21 +1,17 @@
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
-import { createServer } from 'http';
+import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
 import bcrypt from 'bcryptjs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import axios from 'axios';
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import multer from 'multer';
-<<<<<<< HEAD
 import sharp from 'sharp';
 import fs from 'node:fs';
-=======
-import fs from 'fs';
->>>>>>> cf17944498e6c2fcc92ddb605d465cff1e9e7553
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import admin from 'firebase-admin';
@@ -24,9 +20,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import firebaseConfig from '../firebase-applet-config.json' assert { type: 'json' };
 
 console.log('[SERVER] Initializing Firebase Admin...');
-if (!admin) {
-  console.error('[SERVER] Firebase Admin module not found');
-} else {
+if (admin) {
   try {
     const projectId = process.env.FIREBASE_PROJECT_ID || 
                       process.env.GOOGLE_CLOUD_PROJECT || 
@@ -46,7 +40,7 @@ if (!admin) {
       config.credential = admin.credential.cert({
         projectId: projectId,
         clientEmail: clientEmail,
-        privateKey: privateKey.replace(/\\n/g, '\n'),
+        privateKey: privateKey.replaceAll('\\n', '\n'),
       });
       console.log('[SERVER] Using service account credentials from environment variables');
     } else if (credentialsPath && fs.existsSync(credentialsPath)) {
@@ -58,6 +52,7 @@ if (!admin) {
         console.log('[SERVER] Using Application Default Credentials (ADC)');
       } catch (e) {
         console.warn('[SERVER] No explicit credentials found, and ADC failed. Attempting initialization without explicit credentials.');
+        // Suppress error and continue
       }
     }
 
@@ -68,6 +63,8 @@ if (!admin) {
   } catch (error) {
     console.error('[SERVER] Failed to initialize Firebase Admin:', error);
   }
+} else {
+  console.error('[SERVER] Firebase Admin module not found');
 }
 
 // Use environment variable for database ID if available, otherwise fallback to config or (default)
@@ -83,8 +80,6 @@ const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET;
 const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS; // App Password for Gmail
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
 
@@ -169,6 +164,12 @@ const verifyCaptcha = async (token: string) => {
     return false;
   }
 };
+
+function detectInputType(input: string): string {
+  if (input.includes("@")) return "email";
+  if (/^\+?\d{10,15}$/.test(input)) return "phone";
+  return "username";
+}
 
 async function startServer() {
   const app = express();
@@ -342,7 +343,7 @@ async function startServer() {
         phone: phone || null,
         avatar: avatar || null,
         role: 'buyer',
-        wallet_balance: 1000.0,
+        wallet_balance: 1000,
         rating: 0,
         is_verified: false,
         is_email_verified: true,
@@ -361,12 +362,6 @@ async function startServer() {
       res.status(400).json({ error: error.message });
     }
   });
-
-  function detectInputType(input: string) {
-    if (input.includes("@")) return "email";
-    if (/^\+?\d{10,15}$/.test(input)) return "phone";
-    return "username";
-  }
 
   app.post('/api/auth/login', async (req, res) => {
     const { captchaToken } = req.body;
@@ -417,7 +412,7 @@ async function startServer() {
           email: user?.email, 
           name: user?.name, 
           username: user?.username,
-          avatar: user?.avatar || user?.avatar_url || "/default-avatar.png",
+          avatar: user?.avatar ?? user?.avatar_url ?? "/default-avatar.png",
           role: user?.role,
           wallet_balance: user?.wallet_balance,
           rating: user?.rating,
@@ -457,22 +452,6 @@ async function startServer() {
   });
 
   // --- OAuth Routes ---
-  app.get('/api/auth/google/url', (req, res) => {
-    if (!GOOGLE_CLIENT_ID) return res.status(500).json({ error: 'Google OAuth not configured' });
-    const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
-    const redirectUri = `${origin}/auth/callback`;
-    const params = new URLSearchParams({
-      client_id: GOOGLE_CLIENT_ID,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      scope: 'openid email profile',
-      state: 'google',
-      access_type: 'offline',
-      prompt: 'consent'
-    });
-    res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` });
-  });
-
   app.get('/api/auth/github/url', (req, res) => {
     if (!GITHUB_CLIENT_ID) return res.status(500).json({ error: 'GitHub OAuth not configured' });
     const origin = process.env.APP_URL || req.headers.origin || 'http://localhost:3000';
@@ -499,50 +478,7 @@ async function startServer() {
       let name: string = '';
       let avatarUrl: string = '';
 
-      if (state === 'google') {
-        const tokenRes = await axios.post('https://oauth2.googleapis.com/token', {
-          code,
-          client_id: GOOGLE_CLIENT_ID,
-          client_secret: GOOGLE_CLIENT_SECRET,
-          redirect_uri: redirectUri,
-          grant_type: 'authorization_code'
-        });
-        const { access_token } = tokenRes.data;
-        const userRes = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
-          headers: { Authorization: `Bearer ${access_token}` }
-        });
-        const googleUser = userRes.data; // { id, email, name, picture }
-        email = googleUser.email;
-        name = googleUser.name;
-        avatarUrl = googleUser.picture;
-        
-        const userSnap = await firestore.collection('users').where('google_id', '==', googleUser.id).get();
-        const emailSnap = await firestore.collection('users').where('email', '==', googleUser.email.toLowerCase()).get();
-        
-        if (!userSnap.empty) {
-          user = { ...userSnap.docs[0].data(), id: userSnap.docs[0].id };
-        } else if (!emailSnap.empty) {
-          user = { ...emailSnap.docs[0].data(), id: emailSnap.docs[0].id };
-          await firestore.collection('users').doc(user.id).update({ google_id: googleUser.id, is_email_verified: true });
-        } else {
-          const username = googleUser.email.split('@')[0] + Math.floor(Math.random() * 1000);
-          const newUser = {
-            email: googleUser.email.toLowerCase(),
-            password: 'OAUTH_USER',
-            name: googleUser.name,
-            username: username.toLowerCase(),
-            google_id: googleUser.id,
-            is_email_verified: true,
-            avatar_url: googleUser.picture,
-            wallet_balance: 1000,
-            rating: 0,
-            role: 'buyer',
-            created_at: admin.firestore.FieldValue.serverTimestamp()
-          };
-          const docRef = await firestore.collection('users').add(newUser);
-          user = { ...newUser, id: docRef.id };
-        }
-      } else if (state === 'github') {
+      if (state === 'github') {
         const tokenRes = await axios.post('https://github.com/login/oauth/access_token', {
           code,
           client_id: GITHUB_CLIENT_ID,
@@ -1115,7 +1051,7 @@ async function startServer() {
         description,
         category,
         condition,
-        price: parseFloat(price),
+        price: Number.parseFloat(price),
         is_negotiable: !!is_negotiable,
         location,
         images: images || [],
@@ -1148,7 +1084,7 @@ async function startServer() {
         listing_id,
         buyer_id: req.user.id,
         seller_id: listing?.seller_id,
-        amount: parseFloat(amount),
+        amount: Number.parseFloat(amount),
         status: 'pending',
         expires_at: admin.firestore.Timestamp.fromDate(expires_at),
         created_at: admin.firestore.FieldValue.serverTimestamp()
@@ -1184,7 +1120,7 @@ async function startServer() {
         };
       }));
 
-      res.json(offers.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
+      res.json(offers.toSorted((a, b) => b.created_at.toDate() - a.created_at.toDate()));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1251,7 +1187,7 @@ async function startServer() {
         };
       }));
 
-      res.json(transactions.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
+      res.json(transactions.toSorted((a, b) => b.created_at.toDate() - a.created_at.toDate()));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1835,7 +1771,7 @@ async function startServer() {
     app.get('*', (req, res) => res.sendFile(path.resolve(__dirname, '../frontend/dist/index.html')));
   }
 
-  httpServer.listen(3000, '0.0.0.0', () => {
+  httpServer.listen(3000, '0.0.0.0', async () => {
     console.log('Server running on http://localhost:3000');
     
     // Cleanup job for deleted accounts (runs every hour)
@@ -1876,7 +1812,9 @@ async function startServer() {
       const usersSnap = await firestore.collection('users').limit(1).get();
       if (usersSnap.empty) {
         console.log('Seeding sample data...');
-        const hashedPassword = bcrypt.hashSync('password123', 10);
+        // Use a default password from environment or generate a random one
+        const defaultPassword = process.env.SEED_PASSWORD || crypto.randomBytes(16).toString('hex');
+        const hashedPassword = bcrypt.hashSync(defaultPassword, 10);
         
         // Create users
         const user1Ref = firestore.collection('users').doc();
@@ -1885,7 +1823,7 @@ async function startServer() {
 
         await user1Ref.set({ email: 'alice@example.com', password: hashedPassword, name: 'Alice Green', username: 'alice', wallet_balance: 500, rating: 4.9, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
         await user2Ref.set({ email: 'bob@example.com', password: hashedPassword, name: 'Bob Smith', username: 'bob', wallet_balance: 1000, rating: 4.5, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
-        await user3Ref.set({ email: 'nefaryus@example.com', password: hashedPassword, name: 'Nefaryus', username: 'Nefaryus', wallet_balance: 1500, rating: 5.0, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
+        await user3Ref.set({ email: 'nefaryus@example.com', password: hashedPassword, name: 'Nefaryus', username: 'Nefaryus', wallet_balance: 1500, rating: 5, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
         
         // Create listings
         const listings = [
@@ -1911,7 +1849,9 @@ async function startServer() {
         }
       }
     };
-    seedData().catch(console.error);
+    seedData().catch(err => {
+      console.warn('[SEED] Failed to seed data:', err.message);
+    });
   });
 }
 
