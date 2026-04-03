@@ -6,3 +6,11 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Firebase
+*-firebase-adminsdk-*.json
+firebase-debug.log
+firebase-functions-debug.log
+.firebaserc
+functions/lib/
+functions/node_modules/
