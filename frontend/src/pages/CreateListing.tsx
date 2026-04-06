@@ -1,14 +1,17 @@
-import React, { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Camera, MapPin, DollarSign, Loader2, ArrowLeft, X, AlertCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Camera, MapPin, DollarSign, Loader2, ArrowLeft, X, AlertCircle, Trash2 } from 'lucide-react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage, auth } from '../firebase';
 import LocationSelector from '../components/LocationSelector';
 
 export default function CreateListing({ user }: { user: any }) {
   const navigate = useNavigate();
+  const { id } = useParams();
+  const isEditMode = !!id;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(isEditMode);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +31,47 @@ export default function CreateListing({ user }: { user: any }) {
     subcounty: '',
     ward: ''
   });
+
+  useEffect(() => {
+    if (isEditMode) {
+      fetchListing();
+    }
+  }, [id]);
+
+  const fetchListing = async () => {
+    try {
+      const res = await fetch(`/api/listings/${id}`);
+      const data = await res.json();
+      if (res.ok) {
+        setFormData({
+          title: data.title || '',
+          description: data.description || '',
+          category: data.category || 'Fashion',
+          condition: data.condition || 'Good',
+          price: data.price?.toString() || '',
+          location: data.location || '',
+          is_negotiable: !!data.is_negotiable,
+          images: data.images || []
+        });
+        
+        // Try to parse location if it's in the standard format "County, Subcounty, Ward"
+        if (data.location) {
+          const parts = data.location.split(',').map((p: string) => p.trim());
+          setLocationData({
+            county: parts[0] || '',
+            subcounty: parts[1] || '',
+            ward: parts[2] || ''
+          });
+        }
+      } else {
+        setError(data.error || 'Failed to fetch listing');
+      }
+    } catch (err) {
+      setError('Failed to fetch listing details');
+    } finally {
+      setFetching(false);
+    }
+  };
 
   const handleLocationChange = (loc: { county: string; subcounty: string; ward: string }) => {
     setLocationData(loc);
@@ -120,8 +164,11 @@ export default function CreateListing({ user }: { user: any }) {
     setError(null);
 
     try {
-      const res = await fetch('/api/listings', {
-        method: 'POST',
+      const url = isEditMode ? `/api/listings/${id}` : '/api/listings';
+      const method = isEditMode ? 'PATCH' : 'POST';
+      
+      const res = await fetch(url, {
+        method,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -136,9 +183,9 @@ export default function CreateListing({ user }: { user: any }) {
       const data = await res.json();
 
       if (res.ok) {
-        navigate('/marketplace');
+        navigate(isEditMode ? `/listing/${id}` : '/marketplace');
       } else {
-        throw new Error(data.error || 'Failed to create listing');
+        throw new Error(data.error || `Failed to ${isEditMode ? 'update' : 'create'} listing`);
       }
     } catch (err: any) {
       console.error('Submit error:', err);
@@ -148,6 +195,38 @@ export default function CreateListing({ user }: { user: any }) {
     }
   };
 
+  const handleDelete = async () => {
+    if (!window.confirm('Are you sure you want to delete this listing?')) return;
+    
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/listings/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (res.ok) {
+        navigate('/profile');
+      } else {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to delete listing');
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (fetching) {
+    return (
+      <div className="flex h-[60vh] items-center justify-center">
+        <Loader2 className="h-12 w-12 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-8 pb-20">
       <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-slate-500 hover:text-blue-600">
@@ -155,8 +234,8 @@ export default function CreateListing({ user }: { user: any }) {
       </button>
 
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold">Create Listing</h1>
-        <p className="text-slate-500">Tell us about what you're selling.</p>
+        <h1 className="text-3xl font-bold">{isEditMode ? 'Edit Listing' : 'Create Listing'}</h1>
+        <p className="text-slate-500">{isEditMode ? 'Update your item details.' : "Tell us about what you're selling."}</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-8">
@@ -304,13 +383,26 @@ export default function CreateListing({ user }: { user: any }) {
           </label>
         </div>
 
-        <button
-          type="submit"
-          disabled={loading || uploading}
-          className="flex h-16 w-full items-center justify-center rounded-2xl bg-blue-600 text-xl font-bold text-white transition-all hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading || uploading ? <Loader2 className="h-6 w-6 animate-spin" /> : 'Publish Listing'}
-        </button>
+        <div className="flex gap-4">
+          {isEditMode && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={loading}
+              className="flex h-16 w-1/3 items-center justify-center gap-2 rounded-2xl bg-red-50 text-red-600 transition-all hover:bg-red-100 disabled:opacity-50 font-bold"
+            >
+              <Trash2 size={20} />
+              Delete
+            </button>
+          )}
+          <button
+            type="submit"
+            disabled={loading || uploading}
+            className={`flex h-16 items-center justify-center rounded-2xl text-xl font-bold text-white transition-all disabled:opacity-50 ${isEditMode ? 'flex-1 bg-slate-900 hover:bg-slate-800' : 'w-full bg-blue-600 hover:bg-blue-700'}`}
+          >
+            {loading || uploading ? <Loader2 className="h-6 w-6 animate-spin" /> : (isEditMode ? 'Save Changes' : 'Publish Listing')}
+          </button>
+        </div>
       </form>
     </div>
   );

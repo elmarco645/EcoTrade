@@ -6,7 +6,8 @@ import {
   AtSign, X, Save, Fingerprint, ExternalLink, 
   TrendingUp, ShoppingBag, Heart, MoreHorizontal,
   Twitter, Instagram, Globe, Share2, Camera,
-  ChevronRight, Award, Zap, Shield, Download, Trash2, Lock, Mail, Key
+  ChevronRight, Award, Zap, Shield, Download, Trash2, Lock, Mail, Key,
+  Plus, Edit2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { updatePassword, verifyBeforeUpdateEmail, deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
@@ -800,6 +801,17 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </button>
                 ))}
               </div>
+              {isOwnProfile && activeTab === 'listings' && (
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => navigate('/create-listing')}
+                  className="mb-4 flex items-center gap-2 rounded-2xl bg-blue-600 px-6 py-3 text-xs font-black text-white shadow-xl shadow-blue-200 hover:bg-blue-700 transition-all uppercase tracking-widest"
+                >
+                  <Plus size={16} />
+                  Add Listing
+                </motion.button>
+              )}
             </div>
 
             <motion.div 
@@ -855,12 +867,24 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         </div>
                         <div className="mt-4 flex items-center justify-between pt-4 border-t border-slate-50">
                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{listing.condition}</span>
-                          <button 
-                            onClick={() => navigate(`/listing/${listing.id}`)}
-                            className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-blue-600 hover:text-white transition-colors"
-                          >
-                            <ExternalLink size={14} />
-                          </button>
+                          <div className="flex gap-2">
+                            {isOwnProfile && (
+                              <button 
+                                onClick={() => navigate(`/edit-listing/${listing.id}`)}
+                                className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-slate-900 hover:text-white transition-colors"
+                                title="Edit Listing"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                            )}
+                            <button 
+                              onClick={() => navigate(`/listing/${listing.id}`)}
+                              className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-blue-600 hover:text-white transition-colors"
+                              title="View Listing"
+                            >
+                              <ExternalLink size={14} />
+                            </button>
+                          </div>
                         </div>
                       </motion.div>
                     ))}

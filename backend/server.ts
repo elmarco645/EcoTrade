@@ -1269,6 +1269,65 @@ async function startServer() {
     }
   });
 
+  app.patch('/api/listings/:id', authenticateToken, async (req: any, res) => {
+    const { id } = req.params;
+    const { title, description, category, condition, price, is_negotiable, location, images, status } = req.body;
+    try {
+      const listingRef = firestore.collection('listings').doc(id);
+      const doc = await listingRef.get();
+      
+      if (!doc.exists) {
+        return res.status(404).json({ error: 'Listing not found' });
+      }
+      
+      const listingData = doc.data();
+      if (listingData?.seller_id !== req.user.id) {
+        return res.status(403).json({ error: 'Unauthorized to edit this listing' });
+      }
+
+      const updateData: any = {
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
+      };
+      
+      if (title !== undefined) updateData.title = title;
+      if (description !== undefined) updateData.description = description;
+      if (category !== undefined) updateData.category = category;
+      if (condition !== undefined) updateData.condition = condition;
+      if (price !== undefined) updateData.price = parseFloat(price);
+      if (is_negotiable !== undefined) updateData.is_negotiable = !!is_negotiable;
+      if (location !== undefined) updateData.location = location;
+      if (images !== undefined) updateData.images = images;
+      if (status !== undefined) updateData.status = status;
+
+      await listingRef.update(updateData);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete('/api/listings/:id', authenticateToken, async (req: any, res) => {
+    const { id } = req.params;
+    try {
+      const listingRef = firestore.collection('listings').doc(id);
+      const doc = await listingRef.get();
+      
+      if (!doc.exists) {
+        return res.status(404).json({ error: 'Listing not found' });
+      }
+      
+      const listingData = doc.data();
+      if (listingData?.seller_id !== req.user.id) {
+        return res.status(403).json({ error: 'Unauthorized to delete this listing' });
+      }
+
+      await listingRef.delete();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   // --- Offer Routes ---
   app.post('/api/offers', authenticateToken, async (req: any, res) => {
     const { listing_id, amount } = req.body;

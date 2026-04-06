@@ -152,6 +152,10 @@ export default function App() {
               element={user ? <CreateListing user={user} /> : <Navigate to="/login" />} 
             />
             <Route 
+              path="/edit-listing/:id" 
+              element={user ? <CreateListing user={user} /> : <Navigate to="/login" />} 
+            />
+            <Route 
               path="/profile" 
               element={user ? <Profile user={user} /> : <Navigate to="/login" />} 
             />
