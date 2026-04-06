@@ -216,7 +216,8 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
         throw new Error(data.error || 'Failed to delete listing');
       }
     } catch (err: any) {
-      setError(err.message);
+      console.error('[DELETE ERROR] Failed to remove listing:', err);
+      setError(`Failed to delete listing: ${err.message || 'Server error'}`);
     } finally {
       setActionLoading(false);
     }

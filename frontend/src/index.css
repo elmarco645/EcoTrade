@@ -3,3 +3,7 @@
 body {
   background-color: #f0f0f0 !important;
 }
+
+.dynamic-progress {
+  width: var(--progress, 0%);
+}

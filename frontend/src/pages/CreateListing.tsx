@@ -111,19 +111,39 @@ export default function CreateListing({ user }: { user: any }) {
         const uploadTask = uploadBytesResumable(storageRef, file);
 
         const url = await new Promise<string>((resolve, reject) => {
+          // 30 second timeout to prevent endless loading
+          const timeout = setTimeout(() => {
+            console.error('[UPLOAD ERROR] File upload timed out after 30s:', file.name);
+            reject(new Error(`Upload timed out for ${file.name}. Please check your connection or Firebase Storage settings.`));
+          }, 30000);
+
           uploadTask.on('state_changed', 
             (snapshot) => {
               const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
               setUploadProgress(progress);
-              console.log(`[UPLOAD] Progress for ${file.name}: ${progress}%`);
+              console.log(`[UPLOAD] Progress for ${file.name}: ${Math.round(progress)}%`);
             }, 
-            (error) => {
-              console.error('[UPLOAD ERROR] Task failed:', error);
-              reject(error);
+            (error: any) => {
+              clearTimeout(timeout);
+              console.error('[UPLOAD ERROR] Firebase Task failed:', error);
+              const isCorsError = error.code === 'storage/unauthorized' || 
+                                 error.message?.toLowerCase().includes('cors') || 
+                                 error.code === 'storage/retry-limit-exceeded';
+              
+              if (isCorsError) {
+                reject(new Error('Firebase Storage CORS Error: Localhost:3000 is blocked. Use `gsutil cors set cors.json gs://YOUR_BUCKET` to fix. See walkthrough.md.'));
+              } else {
+                reject(new Error(`Firebase Error: ${error.message}`));
+              }
             }, 
             async () => {
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve(downloadURL);
+              clearTimeout(timeout);
+              try {
+                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                resolve(downloadURL);
+              } catch (err: any) {
+                reject(new Error(`Failed to get download URL: ${err.message}`));
+              }
             }
           );
         });
@@ -255,6 +275,8 @@ export default function CreateListing({ user }: { user: any }) {
             className="hidden"
             ref={fileInputRef}
             onChange={handleImageUpload}
+            title="Upload product images"
+            placeholder="Browse files"
           />
           
           <div 
@@ -284,6 +306,7 @@ export default function CreateListing({ user }: { user: any }) {
                     type="button"
                     onClick={() => removeImage(index)}
                     className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    title="Remove this image"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -313,6 +336,7 @@ export default function CreateListing({ user }: { user: any }) {
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-6 outline-none focus:border-blue-500 focus:bg-white"
                 value={formData.category}
                 onChange={e => setFormData({...formData, category: e.target.value})}
+                title="Select product category"
               >
                 <option>Fashion</option>
                 <option>Electronics</option>
@@ -327,6 +351,7 @@ export default function CreateListing({ user }: { user: any }) {
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-6 outline-none focus:border-blue-500 focus:bg-white"
                 value={formData.condition}
                 onChange={e => setFormData({...formData, condition: e.target.value})}
+                title="Select product condition"
               >
                 <option>New</option>
                 <option>Like New</option>

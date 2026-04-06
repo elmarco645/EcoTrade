@@ -58,7 +58,7 @@ export default function EditListing({ user }: { user: any }) {
           price: data.price?.toString() || '',
           location: data.location || '',
           is_negotiable: !!data.is_negotiable,
-          images: data.images || []
+          images: Array.isArray(data.images) ? data.images : []
         });
         
         if (data.location) {
@@ -103,10 +103,40 @@ export default function EditListing({ user }: { user: any }) {
         const uploadTask = uploadBytesResumable(storageRef, file);
 
         const url = await new Promise<string>((resolve, reject) => {
+          // 30 second timeout to prevent endless loading
+          const timeout = setTimeout(() => {
+            console.error('[UPLOAD ERROR] File upload timed out after 30s:', file.name);
+            reject(new Error(`Upload timed out for ${file.name}. Please check your connection or Firebase Storage settings.`));
+          }, 30000);
+
           uploadTask.on('state_changed', 
-            (snapshot) => setUploadProgress((snapshot.bytesTransferred / snapshot.totalBytes) * 100),
-            (error) => reject(error),
-            async () => resolve(await getDownloadURL(uploadTask.snapshot.ref))
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              setUploadProgress(progress);
+              console.log(`[UPLOAD] Progress for ${file.name}: ${Math.round(progress)}%`);
+            }, 
+            (error: any) => {
+              clearTimeout(timeout);
+              console.error('[UPLOAD ERROR] Firebase Task failed:', error);
+              const isCorsError = error.code === 'storage/unauthorized' || 
+                                 error.message?.toLowerCase().includes('cors') || 
+                                 error.code === 'storage/retry-limit-exceeded';
+              
+              if (isCorsError) {
+                reject(new Error('Firebase Storage CORS Error: Localhost:3000 is blocked. Use `gsutil cors set cors.json gs://YOUR_BUCKET` to fix. See walkthrough.md.'));
+              } else {
+                reject(new Error(`Firebase Error: ${error.message}`));
+              }
+            }, 
+            async () => {
+              clearTimeout(timeout);
+              try {
+                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                resolve(downloadURL);
+              } catch (err: any) {
+                reject(new Error(`Failed to get download URL: ${err.message}`));
+              }
+            }
           );
         });
         urls.push(url);
@@ -256,7 +286,7 @@ export default function EditListing({ user }: { user: any }) {
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Add Photos</span>
             </button>
 
-            {formData.images.map((url, index) => (
+            {Array.isArray(formData.images) && formData.images.map((url, index) => (
               <div key={index} className="group relative aspect-square overflow-hidden rounded-[2rem] bg-slate-100 shadow-sm border border-slate-100">
                 <img src={url} alt="" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" />
                 <button
@@ -273,7 +303,7 @@ export default function EditListing({ user }: { user: any }) {
           {uploading && (
              <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden" role="presentation">
                 <span className="sr-only">Image upload progress: {Math.round(uploadProgress)}%</span>
-                <div className="h-full bg-blue-600 transition-all" style={{ ['width' as string]: `${uploadProgress}%` }} />
+                <div className="h-full bg-blue-600 transition-all dynamic-progress" style={{ '--progress': `${uploadProgress}%` } as React.CSSProperties} />
              </div>
           )}
         </div>
