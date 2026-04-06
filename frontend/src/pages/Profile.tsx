@@ -443,7 +443,12 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
               {error ? <X size={16} /> : <CheckCircle size={16} />}
             </div>
             <p className="font-semibold">{error || success}</p>
-            <button onClick={() => { setError(''); setSuccess(''); }} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">
+            <button 
+              onClick={() => { setError(''); setSuccess(''); }} 
+              className="ml-4 opacity-50 hover:opacity-100 transition-opacity"
+              title="Close notification"
+              aria-label="Close notification"
+            >
               <X size={18} />
             </button>
           </motion.div>
@@ -473,6 +478,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                     onClick={() => coverInputRef.current?.click()} 
                     className="rounded-full bg-white/20 backdrop-blur-md p-3 text-white hover:bg-white/40 transition-all"
                     title="Upload Cover"
+                    aria-label="Upload Cover"
                   >
                     <Camera size={20} />
                   </button>
@@ -482,6 +488,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                     onClick={() => setIsEditing(true)} 
                     className="rounded-full bg-white/20 backdrop-blur-md p-3 text-white hover:bg-white/40 transition-all"
                     title="Edit Profile"
+                    aria-label="Edit Profile"
                   >
                     <Settings size={20} />
                   </button>
@@ -493,6 +500,8 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                 className="hidden" 
                 accept="image/*" 
                 onChange={(e) => handleFileChange(e, 'cover')} 
+                title="Upload cover image"
+                aria-label="Upload cover image"
               />
             </div>
 
@@ -510,6 +519,8 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                     <button 
                       onClick={() => avatarInputRef.current?.click()}
                       className="absolute inset-1.5 rounded-[2rem] bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
+                      title="Change avatar"
+                      aria-label="Change avatar"
                     >
                       <Camera size={24} />
                     </button>
@@ -520,6 +531,8 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                     className="hidden" 
                     accept="image/*" 
                     onChange={(e) => handleFileChange(e, 'avatar')} 
+                    title="Upload avatar image"
+                    aria-label="Upload avatar image"
                   />
                 </div>
                 <div className="absolute bottom-0 right-0 lg:right-auto lg:left-24 flex gap-2">
@@ -529,6 +542,8 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                       whileTap={{ scale: 0.9 }}
                       onClick={() => setIsEditing(true)}
                       className="rounded-2xl bg-white p-3 shadow-xl border border-slate-100 text-slate-600 hover:text-blue-600 transition-colors"
+                      title="Edit Profile"
+                      aria-label="Edit Profile"
                     >
                       <Settings className="h-5 w-5" />
                     </motion.button>
@@ -538,6 +553,8 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                     whileTap={{ scale: 0.9 }}
                     onClick={handleShare}
                     className="rounded-2xl bg-white p-3 shadow-xl border border-slate-100 text-slate-600 hover:text-blue-600 transition-colors"
+                    title="Share Profile"
+                    aria-label="Share Profile"
                   >
                     <Share2 className="h-5 w-5" />
                   </motion.button>
@@ -574,22 +591,22 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                 {/* Social Links */}
                 <div className="flex items-center justify-center lg:justify-start gap-4 pt-2">
                   {socialLinks.twitter && (
-                    <a href={`https://twitter.com/${socialLinks.twitter}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-400 transition-colors">
+                    <a href={`https://twitter.com/${socialLinks.twitter}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-400 transition-colors" title="Twitter" aria-label="Visit Twitter profile">
                       <Twitter size={18} />
                     </a>
                   )}
                   {socialLinks.instagram && (
-                    <a href={`https://instagram.com/${socialLinks.instagram}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-pink-500 transition-colors">
+                    <a href={`https://instagram.com/${socialLinks.instagram}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-pink-500 transition-colors" title="Instagram" aria-label="Visit Instagram profile">
                       <Instagram size={18} />
                     </a>
                   )}
                   {socialLinks.whatsapp && (
-                    <a href={`https://wa.me/${socialLinks.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors">
+                    <a href={`https://wa.me/${socialLinks.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors" title="WhatsApp" aria-label="Chat on WhatsApp">
                       <MessageSquare size={18} />
                     </a>
                   )}
                   {socialLinks.website && (
-                    <a href={socialLinks.website.startsWith('http') ? socialLinks.website : `https://${socialLinks.website}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors">
+                    <a href={socialLinks.website.startsWith('http') ? socialLinks.website : `https://${socialLinks.website}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors" title="Website" aria-label="Visit personal website">
                       <Globe size={18} />
                     </a>
                   )}
@@ -841,9 +858,13 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                             referrerPolicy="no-referrer"
                           />
                           <div className="absolute top-3 right-3">
-                            <div className="rounded-full bg-white/90 backdrop-blur-md p-2 text-slate-900 shadow-lg">
+                            <button 
+                              className="rounded-full bg-white/90 backdrop-blur-md p-2 text-slate-900 shadow-lg"
+                              title="Add to favorites"
+                              aria-label="Add to favorites"
+                            >
                               <Heart size={16} className="group-hover:fill-red-500 group-hover:text-red-500 transition-colors" />
-                            </div>
+                            </button>
                           </div>
                         </div>
                         <div className="mt-4 flex items-start justify-between">
@@ -858,6 +879,8 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                           <button 
                             onClick={() => navigate(`/listing/${listing.id}`)}
                             className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-blue-600 hover:text-white transition-colors"
+                            title="View Listing"
+                            aria-label="View Listing"
                           >
                             <ExternalLink size={14} />
                           </button>
@@ -926,6 +949,8 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
               exit={{ opacity: 0 }}
               onClick={() => setIsEditing(false)}
               className="absolute inset-0 bg-slate-900/40 backdrop-blur-md"
+              title="Close modal"
+              aria-label="Close modal backdrop"
             />
             <motion.div 
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -935,7 +960,12 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
             >
               <div className="mb-8 flex items-center justify-between">
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">Edit Profile</h2>
-                <button onClick={() => setIsEditing(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                <button 
+                  onClick={() => setIsEditing(false)} 
+                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                  title="Close edit modal"
+                  aria-label="Close edit profile modal"
+                >
                   <X size={20} />
                 </button>
               </div>
@@ -949,6 +979,9 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         value={editForm.name} 
                         onChange={(e) => setEditForm({...editForm, name: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                        title="Full Name"
+                        aria-label="Full Name"
+                        placeholder="Your full name"
                       />
                     </div>
                     <div className="space-y-2">
@@ -971,6 +1004,9 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, bio: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         rows={3}
+                        title="Bio"
+                        aria-label="Bio"
+                        placeholder="Tell us about yourself"
                       />
                     </div>
                   </div>
@@ -994,6 +1030,8 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, cover_url: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         placeholder="https://..."
+                        title="Cover URL"
+                        aria-label="Cover URL"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1003,6 +1041,9 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         value={editForm.location} 
                         onChange={(e) => setEditForm({...editForm, location: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                        title="Location"
+                        aria-label="Location"
+                        placeholder="City, Country"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1012,6 +1053,8 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         value={editForm.dob} 
                         onChange={(e) => setEditForm({...editForm, dob: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
+                        title="Date of Birth"
+                        aria-label="Date of Birth"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1079,6 +1122,8 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   type="submit" 
                   disabled={actionLoading}
                   className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 py-5 font-black text-white shadow-xl shadow-blue-200 hover:bg-blue-700 disabled:opacity-50 transition-all"
+                  title="Save changes"
+                  aria-label="Save profile changes"
                 >
                   {actionLoading ? <Loader2 className="animate-spin" /> : <><Save size={20} /> Save Changes</>}
                 </motion.button>
@@ -1109,7 +1154,12 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Verification</h2>
                 </div>
-                <button onClick={() => setIsVerifying(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                <button 
+                  onClick={() => setIsVerifying(false)} 
+                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                  title="Close"
+                  aria-label="Close verification modal"
+                >
                   <X size={20} />
                 </button>
               </div>
@@ -1177,7 +1227,12 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Delete Account</h2>
                 </div>
-                <button onClick={() => setIsDeleting(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                <button 
+                  onClick={() => setIsDeleting(false)} 
+                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                  title="Close"
+                  aria-label="Close delete account modal"
+                >
                   <X size={20} />
                 </button>
               </div>
@@ -1245,7 +1300,12 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Password</h2>
                 </div>
-                <button onClick={() => setIsChangingPassword(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                <button 
+                  onClick={() => setIsChangingPassword(false)} 
+                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                  title="Close"
+                  aria-label="Close change password modal"
+                >
                   <X size={20} />
                 </button>
               </div>
@@ -1332,7 +1392,12 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Email</h2>
                 </div>
-                <button onClick={() => setIsChangingEmail(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                <button 
+                  onClick={() => setIsChangingEmail(false)} 
+                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                  title="Close"
+                  aria-label="Close change email modal"
+                >
                   <X size={20} />
                 </button>
               </div>
