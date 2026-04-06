@@ -15,6 +15,7 @@ import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
+import sharp from 'sharp';
 
 import firebaseConfig from '../firebase-applet-config.json' assert { type: 'json' };
 
@@ -334,6 +335,9 @@ async function startServer() {
   const uploadsDir = path.join(__dirname, '../uploads');
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  if (!fs.existsSync(path.join(uploadsDir, 'listings'))) {
+    fs.mkdirSync(path.join(uploadsDir, 'listings'), { recursive: true });
   }
 
   // Configure multer
@@ -758,13 +762,31 @@ async function startServer() {
       const decodedToken = await admin.auth().verifyIdToken(token);
       const uid = decodedToken.uid;
 
-      const userDoc = await firestore.collection('users').doc(uid).get();
+      let userDoc: any = await firestore.collection('users').doc(uid).get();
+      let dbUser = userDoc.data();
       
       if (!userDoc.exists) {
-        return res.status(403).json({ error: 'User profile not found' });
-      }
+        if (decodedToken.email) {
+          const emailQuery = await firestore.collection('users').where('email', '==', decodedToken.email).get();
+          if (!emailQuery.empty) {
+            userDoc = emailQuery.docs[0];
+            dbUser = userDoc.data();
+            // Optional: You could update the doc with the true uid here if desired
+          }
+        }
 
-      const dbUser = userDoc.data();
+        if (!userDoc.exists) {
+          console.warn(`[AUTH] Auto-creating missing user profile for UID: ${uid}`);
+          dbUser = {
+            email: decodedToken.email || '',
+            name: decodedToken.name || decodedToken.email?.split('@')[0] || 'Unknown User',
+            avatar: decodedToken.picture || null,
+            role: 'buyer',
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+          };
+          await firestore.collection('users').doc(uid).set(dbUser);
+        }
+      }
       
       if (dbUser?.deleted_at) {
         return res.status(403).json({ error: 'Account scheduled for deletion' });
@@ -1085,6 +1107,74 @@ async function startServer() {
   });
 
   // --- Listing Routes ---
+  const memoryUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+  app.post('/api/listings/upload-images', authenticateToken, memoryUpload.array('images', 5), async (req: any, res) => {
+    try {
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ error: 'No files provided' });
+      }
+
+      const imageUrls: string[] = [];
+      const uploadsDir = path.join(__dirname, '../uploads');
+      const appUrl = process.env.APP_URL || 'http://localhost:3000';
+      
+      const filePromises = (req.files as Express.Multer.File[]).map(async (file) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+        const filename = uniqueSuffix + '.webp';
+        const outputPath = path.join(uploadsDir, 'listings', filename);
+
+        await sharp(file.buffer)
+          .resize(1200, null, { withoutEnlargement: true }) // keep aspect ratio
+          .webp({ quality: 80 })
+          .toFile(outputPath);
+
+        return `${appUrl}/uploads/listings/${filename}`;
+      });
+
+      const urls = await Promise.all(filePromises);
+
+      res.json({ success: true, urls });
+    } catch (error: any) {
+      console.error('[LISTING UPLOAD ERROR]:', error);
+      res.status(500).json({ error: `Failed to process listing images: ${error.message}` });
+    }
+  });
+
+  app.post('/api/listings', authenticateToken, async (req: any, res) => {
+    const { title, description, category, condition, price, location, is_negotiable, images } = req.body;
+    
+    if (!title || !price || !category || !condition || !images || images.length === 0) {
+      return res.status(400).json({ error: 'Missing required listing fields.' });
+    }
+
+    try {
+      const dbCollection = firestore.collection('listings');
+      
+      const newListing = {
+        title,
+        description,
+        category,
+        condition,
+        price,
+        location,
+        is_negotiable: is_negotiable ? 1 : 0,
+        images: JSON.stringify(images),
+        seller_id: req.user.id,
+        status: 'active',
+        created_at: admin.firestore.FieldValue.serverTimestamp(),
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
+      };
+
+      const docRef = await dbCollection.add(newListing);
+
+      res.json({ success: true, id: docRef.id });
+    } catch (error: any) {
+      console.error('[API ERROR] Failed to create listing:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get('/api/listings', async (req, res) => {
     try {
       console.log('[API] Fetching all listings...');

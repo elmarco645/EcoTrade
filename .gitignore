@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+*-firebase-adminsdk-*.json
+ts_errors.txt
+uploads/
