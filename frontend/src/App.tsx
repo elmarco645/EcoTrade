@@ -30,6 +30,20 @@ import SearchResults from './pages/SearchResults';
 import PaymentSuccess from './pages/PaymentSuccess';
 import NotFound from './pages/NotFound';
 
+function readStoredCart(): any[] {
+  try {
+    const savedCart = localStorage.getItem('cart');
+    if (!savedCart) return [];
+
+    const parsed = JSON.parse(savedCart);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error('[APP] Failed to parse cart from localStorage:', error);
+    localStorage.removeItem('cart');
+    return [];
+  }
+}
+
 function NavigationLogger() {
   const location = useLocation();
   useEffect(() => {
@@ -91,10 +105,7 @@ export default function App() {
       }
     });
 
-    const savedCart = localStorage.getItem('cart');
-    if (savedCart) {
-      setCart(JSON.parse(savedCart));
-    }
+    setCart(readStoredCart());
 
     return () => unsubscribe();
   }, []);

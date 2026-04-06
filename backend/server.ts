@@ -320,6 +320,7 @@ async function startServer() {
 
   // Apply sensitive action limiter to specific endpoints
   app.post('/api/listings', sensitiveActionLimiter);
+  app.post('/api/listings/upload-images', sensitiveActionLimiter);
   app.post('/api/offers', sensitiveActionLimiter);
   app.post('/api/wallet/deposit', sensitiveActionLimiter);
   app.post('/api/wallet/withdraw', sensitiveActionLimiter);
@@ -981,6 +982,17 @@ async function startServer() {
     }
   });
 
+  app.post('/api/listings/upload-images', authenticateToken, upload.array('images', 8), async (req: any, res) => {
+    const files = Array.isArray(req.files) ? req.files : [];
+
+    if (files.length === 0) {
+      return res.status(400).json({ error: 'No images uploaded' });
+    }
+
+    const urls = files.map((file: Express.Multer.File) => `/uploads/${file.filename}`);
+    res.json({ success: true, urls });
+  });
+
   app.post('/api/user/verify-id', authenticateToken, async (req: any, res) => {
     const { nationalId } = req.body;
     if (!nationalId) return res.status(400).json({ error: 'National ID required' });
@@ -1246,42 +1258,57 @@ async function startServer() {
 
   app.post('/api/listings', authenticateToken, async (req: any, res) => {
     const { title, description, category, condition, price, is_negotiable, location, images } = req.body;
+    console.log(`[LISTING] Attempting to create listing for user: ${req.user.id}`);
+    
     try {
+      const parsedPrice = parseFloat(price);
+      if (isNaN(parsedPrice)) {
+        return res.status(400).json({ error: 'Invalid price format' });
+      }
+
       const listingData = {
         seller_id: req.user.id,
-        title,
-        description,
-        category,
-        condition,
-        price: parseFloat(price),
+        title: title || 'Untitled Listing',
+        description: description || '',
+        category: category || 'Other',
+        condition: condition || 'Used',
+        price: parsedPrice,
         is_negotiable: !!is_negotiable,
-        location,
-        images: images || [],
+        location: location || '',
+        images: Array.isArray(images) ? images : [],
         status: 'available',
         created_at: admin.firestore.FieldValue.serverTimestamp(),
         updated_at: admin.firestore.FieldValue.serverTimestamp()
       };
       
+      console.log('[LISTING] Payload:', JSON.stringify(listingData, null, 2));
+      
       const docRef = await firestore.collection('listings').add(listingData);
+      console.log(`[LISTING] Success! Created ID: ${docRef.id}`);
       res.json({ id: docRef.id });
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      console.error('[LISTING ERROR] Firestore Add Failed:', error);
+      res.status(400).json({ error: `Backend Firestore Error: ${error.message}` });
     }
   });
 
   app.patch('/api/listings/:id', authenticateToken, async (req: any, res) => {
     const { id } = req.params;
     const { title, description, category, condition, price, is_negotiable, location, images, status } = req.body;
+    console.log(`[LISTING] Attempting to update listing: ${id} for user: ${req.user.id}`);
+    
     try {
       const listingRef = firestore.collection('listings').doc(id);
       const doc = await listingRef.get();
       
       if (!doc.exists) {
+        console.error(`[LISTING ERROR] Listing not found: ${id}`);
         return res.status(404).json({ error: 'Listing not found' });
       }
       
       const listingData = doc.data();
       if (listingData?.seller_id !== req.user.id) {
+        console.error(`[LISTING ERROR] Unauthorized update attempt on: ${id} by user: ${req.user.id}`);
         return res.status(403).json({ error: 'Unauthorized to edit this listing' });
       }
 
@@ -1293,16 +1320,24 @@ async function startServer() {
       if (description !== undefined) updateData.description = description;
       if (category !== undefined) updateData.category = category;
       if (condition !== undefined) updateData.condition = condition;
-      if (price !== undefined) updateData.price = parseFloat(price);
+      
+      if (price !== undefined) {
+        const parsedPrice = parseFloat(price);
+        if (!isNaN(parsedPrice)) updateData.price = parsedPrice;
+      }
+      
       if (is_negotiable !== undefined) updateData.is_negotiable = !!is_negotiable;
       if (location !== undefined) updateData.location = location;
-      if (images !== undefined) updateData.images = images;
+      if (images !== undefined) updateData.images = Array.isArray(images) ? images : [];
       if (status !== undefined) updateData.status = status;
 
+      console.log(`[LISTING] Updating ${id} with:`, JSON.stringify(updateData, null, 2));
       await listingRef.update(updateData);
-      res.json({ success: true });
+      console.log(`[LISTING] Success! Updated ID: ${id}`);
+      res.json({ id });
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      console.error('[LISTING ERROR] Firestore Update Failed:', error);
+      res.status(400).json({ error: `Backend Firestore Error: ${error.message}` });
     }
   });
 

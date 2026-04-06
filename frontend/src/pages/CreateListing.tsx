@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Camera, MapPin, DollarSign, Loader2, ArrowLeft, X, AlertCircle, Trash2 } from 'lucide-react';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { storage, auth } from '../firebase';
 import LocationSelector from '../components/LocationSelector';
+import { uploadListingImages } from '../lib/uploadListingImages';
 
 export default function CreateListing({ user }: { user: any }) {
   const navigate = useNavigate();
@@ -82,75 +81,24 @@ export default function CreateListing({ user }: { user: any }) {
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-
-    if (!auth.currentUser) {
-      setError('You must be logged in to upload images.');
-      return;
-    }
+    const selectedFiles = Array.from(files);
 
     setUploading(true);
     setUploadProgress(0);
     setError(null);
 
-    console.log('[UPLOAD] Starting upload for', files.length, 'files');
+    console.log('[UPLOAD] Starting upload for', selectedFiles.length, 'files');
 
     try {
-      const urls: string[] = [];
-      
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        
-        // Check file size (5MB limit)
+      for (const file of selectedFiles) {
         if (file.size > 5 * 1024 * 1024) {
           throw new Error(`File ${file.name} is too large. Max size is 5MB.`);
         }
-
-        console.log('[UPLOAD] Uploading file:', file.name, 'size:', file.size);
-        const storageRef = ref(storage, `listings/${auth.currentUser?.uid}/${Date.now()}_${file.name}`);
-        
-        const uploadTask = uploadBytesResumable(storageRef, file);
-
-        const url = await new Promise<string>((resolve, reject) => {
-          // 30 second timeout to prevent endless loading
-          const timeout = setTimeout(() => {
-            console.error('[UPLOAD ERROR] File upload timed out after 30s:', file.name);
-            reject(new Error(`Upload timed out for ${file.name}. Please check your connection or Firebase Storage settings.`));
-          }, 30000);
-
-          uploadTask.on('state_changed', 
-            (snapshot) => {
-              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-              setUploadProgress(progress);
-              console.log(`[UPLOAD] Progress for ${file.name}: ${Math.round(progress)}%`);
-            }, 
-            (error: any) => {
-              clearTimeout(timeout);
-              console.error('[UPLOAD ERROR] Firebase Task failed:', error);
-              const isCorsError = error.code === 'storage/unauthorized' || 
-                                 error.message?.toLowerCase().includes('cors') || 
-                                 error.code === 'storage/retry-limit-exceeded';
-              
-              if (isCorsError) {
-                reject(new Error('Firebase Storage CORS Error: Localhost:3000 is blocked. Use `gsutil cors set cors.json gs://YOUR_BUCKET` to fix. See walkthrough.md.'));
-              } else {
-                reject(new Error(`Firebase Error: ${error.message}`));
-              }
-            }, 
-            async () => {
-              clearTimeout(timeout);
-              try {
-                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-                resolve(downloadURL);
-              } catch (err: any) {
-                reject(new Error(`Failed to get download URL: ${err.message}`));
-              }
-            }
-          );
-        });
-
-        urls.push(url);
-        console.log('[UPLOAD] File uploaded successfully:', file.name, 'URL:', url);
       }
+
+      const urls = await uploadListingImages(selectedFiles, (progress) => {
+        setUploadProgress(progress);
+      });
 
       setFormData(prev => ({
         ...prev,
