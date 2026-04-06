@@ -239,6 +239,8 @@ export default function EditListing({ user }: { user: any }) {
             className="hidden"
             ref={fileInputRef}
             onChange={handleImageUpload}
+            title="Upload listing images"
+            placeholder="Select files"
           />
           
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -261,6 +263,7 @@ export default function EditListing({ user }: { user: any }) {
                   type="button"
                   onClick={() => removeImage(index)}
                   className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white text-red-500 shadow-xl opacity-0 transition-opacity group-hover:opacity-100"
+                  title="Remove image"
                 >
                   <X className="h-4 w-4" />
                 </button>
