@@ -271,7 +271,7 @@ export default function EditListing({ user }: { user: any }) {
             ))}
           </div>
           {uploading && (
-             <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden" role="progressbar" aria-valuenow={uploadProgress} aria-valuemin={0} aria-valuemax={100} title="Image upload progress">
+             <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden" role="progressbar" aria-valuenow={Math.round(uploadProgress)} aria-valuemin={0} aria-valuemax={100} title="Image upload progress">
                 <div className="h-full bg-blue-600 transition-all" style={{ width: `${uploadProgress}%` }} />
              </div>
           )}
