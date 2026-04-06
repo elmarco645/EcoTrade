@@ -50,6 +50,7 @@
     "@types/nodemailer": "^7.0.11",
     "@types/react-google-recaptcha": "^2.1.9",
     "autoprefixer": "^10.4.21",
+    "firebase-tools": "^15.13.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
