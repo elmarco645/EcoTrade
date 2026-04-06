@@ -6,8 +6,7 @@ import {
   AtSign, X, Save, Fingerprint, ExternalLink, 
   TrendingUp, ShoppingBag, Heart, MoreHorizontal,
   Twitter, Instagram, Globe, Share2, Camera,
-  ChevronRight, Award, Zap, Shield, Download, Trash2, Lock, Mail, Key,
-  Edit2, Plus
+  ChevronRight, Award, Zap, Shield, Download, Trash2, Lock, Mail, Key
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { updatePassword, verifyBeforeUpdateEmail, deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
@@ -444,12 +443,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
               {error ? <X size={16} /> : <CheckCircle size={16} />}
             </div>
             <p className="font-semibold">{error || success}</p>
-            <button 
-              onClick={() => { setError(''); setSuccess(''); }} 
-              className="ml-4 opacity-50 hover:opacity-100 transition-opacity"
-              title="Close notification"
-              aria-label="Close notification"
-            >
+            <button onClick={() => { setError(''); setSuccess(''); }} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">
               <X size={18} />
             </button>
           </motion.div>
@@ -499,8 +493,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                 className="hidden" 
                 accept="image/*" 
                 onChange={(e) => handleFileChange(e, 'cover')} 
-                title="Upload cover image"
-                aria-label="Upload cover image"
               />
             </div>
 
@@ -518,8 +510,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                     <button 
                       onClick={() => avatarInputRef.current?.click()}
                       className="absolute inset-1.5 rounded-[2rem] bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
-                      title="Change avatar"
-                      aria-label="Change avatar"
                     >
                       <Camera size={24} />
                     </button>
@@ -530,8 +520,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                     className="hidden" 
                     accept="image/*" 
                     onChange={(e) => handleFileChange(e, 'avatar')} 
-                    title="Upload avatar image"
-                    aria-label="Upload avatar image"
                   />
                 </div>
                 <div className="absolute bottom-0 right-0 lg:right-auto lg:left-24 flex gap-2">
@@ -586,22 +574,22 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                 {/* Social Links */}
                 <div className="flex items-center justify-center lg:justify-start gap-4 pt-2">
                   {socialLinks.twitter && (
-                    <a href={`https://twitter.com/${socialLinks.twitter}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-400 transition-colors" title="Twitter" aria-label="Visit Twitter profile">
+                    <a href={`https://twitter.com/${socialLinks.twitter}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-400 transition-colors">
                       <Twitter size={18} />
                     </a>
                   )}
                   {socialLinks.instagram && (
-                    <a href={`https://instagram.com/${socialLinks.instagram}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-pink-500 transition-colors" title="Instagram" aria-label="Visit Instagram profile">
+                    <a href={`https://instagram.com/${socialLinks.instagram}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-pink-500 transition-colors">
                       <Instagram size={18} />
                     </a>
                   )}
                   {socialLinks.whatsapp && (
-                    <a href={`https://wa.me/${socialLinks.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors" title="WhatsApp" aria-label="Chat on WhatsApp">
+                    <a href={`https://wa.me/${socialLinks.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors">
                       <MessageSquare size={18} />
                     </a>
                   )}
                   {socialLinks.website && (
-                    <a href={socialLinks.website.startsWith('http') ? socialLinks.website : `https://${socialLinks.website}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors" title="Website" aria-label="Visit personal website">
+                    <a href={socialLinks.website.startsWith('http') ? socialLinks.website : `https://${socialLinks.website}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors">
                       <Globe size={18} />
                     </a>
                   )}
@@ -795,35 +783,22 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
           {/* Tabs & Content */}
           <div className="space-y-6">
             <div className="flex items-center justify-between border-b border-slate-100 relative">
-              <div className="flex items-center gap-8">
-                <div className="flex gap-8">
-                  {['listings', 'reviews'].map((tab) => (
-                    <button 
-                      key={tab}
-                      onClick={() => setActiveTab(tab as any)}
-                      className={`relative pb-4 text-sm font-black uppercase tracking-widest transition-colors ${activeTab === tab ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
-                    >
-                      {tab} ({tab === 'listings' ? listings.length : reviews.length})
-                      {activeTab === tab && (
-                        <motion.div 
-                          layoutId="activeTab"
-                          className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
-                        />
-                      )}
-                    </button>
-                  ))}
-                </div>
-                {isOwnProfile && activeTab === 'listings' && (
-                  <motion.button
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    onClick={() => navigate('/create-listing')}
-                    className="mb-4 flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all"
+              <div className="flex gap-8">
+                {['listings', 'reviews'].map((tab) => (
+                  <button 
+                    key={tab}
+                    onClick={() => setActiveTab(tab as any)}
+                    className={`relative pb-4 text-sm font-black uppercase tracking-widest transition-colors ${activeTab === tab ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
                   >
-                    <Plus size={14} />
-                    Add Listing
-                  </motion.button>
-                )}
+                    {tab} ({tab === 'listings' ? listings.length : reviews.length})
+                    {activeTab === tab && (
+                      <motion.div 
+                        layoutId="activeTab"
+                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
+                      />
+                    )}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -880,26 +855,12 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         </div>
                         <div className="mt-4 flex items-center justify-between pt-4 border-t border-slate-50">
                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{listing.condition}</span>
-                          <div className="flex gap-2">
-                            {isOwnProfile && (
-                              <button 
-                                onClick={() => navigate(`/edit-listing/${listing.id}`)}
-                                className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-emerald-600 hover:text-white transition-colors"
-                                title="Edit Listing"
-                                aria-label="Edit Listing"
-                              >
-                                <Edit2 size={14} />
-                              </button>
-                            )}
-                            <button 
-                              onClick={() => navigate(`/listing/${listing.id}`)}
-                              className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-blue-600 hover:text-white transition-colors"
-                              title="View Listing"
-                              aria-label="View Listing"
-                            >
-                              <ExternalLink size={14} />
-                            </button>
-                          </div>
+                          <button 
+                            onClick={() => navigate(`/listing/${listing.id}`)}
+                            className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-blue-600 hover:text-white transition-colors"
+                          >
+                            <ExternalLink size={14} />
+                          </button>
                         </div>
                       </motion.div>
                     ))}
@@ -974,12 +935,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
             >
               <div className="mb-8 flex items-center justify-between">
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">Edit Profile</h2>
-                <button 
-                  onClick={() => setIsEditing(false)} 
-                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                  title="Close edit modal"
-                  aria-label="Close edit modal"
-                >
+                <button onClick={() => setIsEditing(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -993,9 +949,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         value={editForm.name} 
                         onChange={(e) => setEditForm({...editForm, name: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
-                        title="Full Name"
-                        aria-label="Full Name"
-                        placeholder="Your full name"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1018,9 +971,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, bio: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         rows={3}
-                        title="Bio"
-                        aria-label="Bio"
-                        placeholder="Tell us about yourself"
                       />
                     </div>
                   </div>
@@ -1053,9 +1003,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         value={editForm.location} 
                         onChange={(e) => setEditForm({...editForm, location: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
-                        title="Location"
-                        aria-label="Location"
-                        placeholder="City, Country"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1065,8 +1012,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         value={editForm.dob} 
                         onChange={(e) => setEditForm({...editForm, dob: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
-                        title="Date of Birth"
-                        aria-label="Date of Birth"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1164,12 +1109,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Verification</h2>
                 </div>
-                <button 
-                  onClick={() => setIsVerifying(false)} 
-                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                  title="Close verification modal"
-                  aria-label="Close verification modal"
-                >
+                <button onClick={() => setIsVerifying(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -1237,12 +1177,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Delete Account</h2>
                 </div>
-                <button 
-                  onClick={() => setIsDeleting(false)} 
-                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                  title="Close delete account modal"
-                  aria-label="Close delete account modal"
-                >
+                <button onClick={() => setIsDeleting(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -1310,12 +1245,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Password</h2>
                 </div>
-                <button 
-                  onClick={() => setIsChangingPassword(false)} 
-                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                  title="Close change password modal"
-                  aria-label="Close change password modal"
-                >
+                <button onClick={() => setIsChangingPassword(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -1402,12 +1332,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Email</h2>
                 </div>
-                <button 
-                  onClick={() => setIsChangingEmail(false)} 
-                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                  title="Close change email modal"
-                  aria-label="Close change email modal"
-                >
+                <button onClick={() => setIsChangingEmail(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>

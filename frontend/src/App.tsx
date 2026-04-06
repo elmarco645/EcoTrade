@@ -11,9 +11,7 @@ import Navbar from './components/Navbar';
 import Breadcrumbs from './components/Breadcrumbs';
 import Home from './pages/Home';
 import Marketplace from './pages/Marketplace';
-import SearchResults from './pages/SearchResults';
 import ListingDetail from './pages/ListingDetail';
-import EditListing from './pages/EditListing';
 import CreateListing from './pages/CreateListing';
 import Profile from './pages/Profile';
 import Wallet from './pages/Wallet';
@@ -27,6 +25,7 @@ import UndoDelete from './pages/UndoDelete';
 import Cart from './pages/Cart';
 import Orders from './pages/Orders';
 import Offers from './pages/Offers';
+import SearchResults from './pages/SearchResults';
 import PaymentSuccess from './pages/PaymentSuccess';
 import NotFound from './pages/NotFound';
 
@@ -151,10 +150,6 @@ export default function App() {
             <Route 
               path="/create-listing" 
               element={user ? <CreateListing user={user} /> : <Navigate to="/login" />} 
-            />
-            <Route 
-              path="/edit-listing/:id" 
-              element={user ? <EditListing user={user} /> : <Navigate to="/login" />} 
             />
             <Route 
               path="/profile" 
