@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Filter, MapPin, Tag, Star, X, ChevronDown, Check, ShieldCheck } from 'lucide-react';
+import { Search, Filter, MapPin, Tag, Star, X, ChevronDown, Check, ShieldCheck, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getFirstImage } from '../lib/imageUtils';
 
@@ -431,6 +431,14 @@ export default function Marketplace() {
                           <ShieldCheck className="h-3 w-3 text-emerald-500 fill-emerald-50" />
                         )}
                       </div>
+                      <Link 
+                        to={`/profile/${listing.seller_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-blue-600 transition-colors"
+                      >
+                        <User className="h-3 w-3" />
+                        {listing.seller_name || 'Seller'}
+                      </Link>
                       <div className="flex items-center gap-1 text-xs font-bold text-amber-500">
                         <Star className="h-3 w-3 fill-current" />
                         {listing.seller_rating || 'New'}

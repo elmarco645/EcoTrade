@@ -273,7 +273,10 @@ export default function ListingDetail({ user, addToCart }: { user: any, addToCar
             )}
           </div>
 
-          <div className="flex items-center gap-4 rounded-2xl bg-slate-100 p-4">
+          <Link 
+            to={`/profile/${listing.seller_id}`}
+            className="flex items-center gap-4 rounded-2xl bg-slate-100 p-4 hover:bg-slate-200 transition-colors"
+          >
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-xl font-bold text-blue-600">
               {listing.seller_name?.[0]}
             </div>
@@ -286,7 +289,7 @@ export default function ListingDetail({ user, addToCart }: { user: any, addToCar
               </div>
               <p className="text-sm text-slate-500">Seller since 2024</p>
             </div>
-          </div>
+          </Link>
         </div>
       </div>
 

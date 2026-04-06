@@ -72,7 +72,6 @@ export default function App() {
         
         // Use Firebase user directly as requested (no database)
         const userData = {
-          id: firebaseUser.uid,
           uid: firebaseUser.uid,
           email: firebaseUser.email,
           displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0],
@@ -157,6 +156,10 @@ export default function App() {
               element={user ? <Profile user={user} /> : <Navigate to="/login" />} 
             />
             <Route 
+              path="/profile/:id" 
+              element={<Profile user={user} />} 
+            />
+            <Route 
               path="/wallet" 
               element={user ? <Wallet user={user} /> : <Navigate to="/login" />} 
             />
@@ -172,8 +175,8 @@ export default function App() {
               path="/offers" 
               element={user ? <Offers user={user} /> : <Navigate to="/login" />} 
             />
-            <Route path="/login" element={user ? <Navigate to="/marketplace" /> : <Login setUser={setUser} />} />
-            <Route path="/register" element={user ? <Navigate to="/marketplace" /> : <Register setUser={setUser} />} />
+            <Route path="/login" element={<Login setUser={setUser} />} />
+            <Route path="/register" element={<Register setUser={setUser} />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/verify-email" element={<VerifyEmail />} />

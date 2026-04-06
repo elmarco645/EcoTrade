@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { 
   User, Settings, Package, Star, Calendar, MapPin, 
   Loader2, MessageSquare, CheckCircle, ShieldCheck, 
@@ -13,14 +13,17 @@ import { updatePassword, verifyBeforeUpdateEmail, deleteUser, EmailAuthProvider,
 import { auth } from '../firebase';
 import { getFirstImage } from '../lib/imageUtils';
 
-export default function Profile({ user: initialUser }: { user: any }) {
+export default function Profile({ user: loggedInUser }: { user: any }) {
+  const { id } = useParams();
   const navigate = useNavigate();
-  const [user, setUser] = useState<any>(initialUser);
+  const [user, setUser] = useState<any>(null);
   const [listings, setListings] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'listings' | 'reviews'>('listings');
   const [isEditing, setIsEditing] = useState(false);
+  const isOwnProfile = (!id || id === loggedInUser?.uid || id === loggedInUser?.id) && !!loggedInUser;
+
   const [editForm, setEditForm] = useState({
     name: '',
     username: '',
@@ -55,10 +58,20 @@ export default function Profile({ user: initialUser }: { user: any }) {
 
   const fetchData = async () => {
     try {
+      const profileId = id || loggedInUser?.uid || loggedInUser?.id;
+      if (!profileId) {
+        setLoading(false);
+        return;
+      }
+      
+      const profileUrl = isOwnProfile ? '/api/user/profile' : `/api/users/${profileId}`;
+      
       const [profileRes, listingsRes, reviewsRes] = await Promise.all([
-        fetch('/api/user/profile', { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } }),
+        fetch(profileUrl, { 
+          headers: isOwnProfile ? { 'Authorization': `Bearer ${localStorage.getItem('token')}` } : {} 
+        }),
         fetch('/api/listings'),
-        fetch(`/api/sellers/${initialUser.id}/reviews`)
+        fetch(`/api/sellers/${profileId}/reviews`)
       ]);
 
       const profileData = await profileRes.json();
@@ -67,38 +80,42 @@ export default function Profile({ user: initialUser }: { user: any }) {
 
       if (profileRes.ok && profileData && !profileData.error) {
         setUser(profileData);
-        let socialLinks = { twitter: '', instagram: '', whatsapp: '', website: '' };
-        try {
-          if (profileData.social_links) {
-            socialLinks = typeof profileData.social_links === 'string' 
-              ? JSON.parse(profileData.social_links) 
-              : profileData.social_links;
+        if (isOwnProfile) {
+          let socialLinks = { twitter: '', instagram: '', whatsapp: '', website: '' };
+          try {
+            if (profileData.social_links) {
+              socialLinks = typeof profileData.social_links === 'string' 
+                ? JSON.parse(profileData.social_links) 
+                : profileData.social_links;
+            }
+          } catch (e) {
+            console.error("Error parsing social links", e);
           }
-        } catch (e) {
-          console.error("Error parsing social links", e);
-        }
 
-        setEditForm({
-          name: profileData.name || '',
-          username: profileData.username || '',
-          bio: profileData.bio || '',
-          location: profileData.location || '',
-          dob: profileData.dob || '',
-          avatar_url: profileData.avatar_url || '',
-          cover_url: profileData.cover_url || '',
-          phone: profileData.phone || '',
-          avatar: profileData.avatar || '',
-          social_links: {
-            twitter: socialLinks.twitter || '',
-            instagram: socialLinks.instagram || '',
-            whatsapp: socialLinks.whatsapp || '',
-            website: socialLinks.website || ''
-          }
-        });
+          setEditForm({
+            name: profileData.name || '',
+            username: profileData.username || '',
+            bio: profileData.bio || '',
+            location: profileData.location || '',
+            dob: profileData.dob || '',
+            avatar_url: profileData.avatar_url || '',
+            cover_url: profileData.cover_url || '',
+            phone: profileData.phone || '',
+            avatar: profileData.avatar || '',
+            social_links: {
+              twitter: socialLinks.twitter || '',
+              instagram: socialLinks.instagram || '',
+              whatsapp: socialLinks.whatsapp || '',
+              website: socialLinks.website || ''
+            }
+          });
+        }
+      } else {
+        setError(profileData?.error || 'User not found');
       }
       
       if (Array.isArray(listingsData)) {
-        setListings(listingsData.filter((l: any) => l.seller_id === initialUser.id));
+        setListings(listingsData.filter((l: any) => l.seller_id === profileId));
       } else {
         setListings([]);
       }
@@ -117,7 +134,7 @@ export default function Profile({ user: initialUser }: { user: any }) {
 
   useEffect(() => {
     fetchData();
-  }, [initialUser.id]);
+  }, [id, loggedInUser?.uid, loggedInUser?.id]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -391,6 +408,24 @@ export default function Profile({ user: initialUser }: { user: any }) {
     );
   }
 
+  if (!user) {
+    return (
+      <div className="flex h-[60vh] flex-col items-center justify-center gap-4">
+        <div className="rounded-full bg-slate-100 p-8 text-slate-300">
+          <User size={64} />
+        </div>
+        <h2 className="text-2xl font-black text-slate-900">User not found</h2>
+        <p className="text-slate-500">The profile you're looking for doesn't exist or has been removed.</p>
+        <button 
+          onClick={() => navigate('/')} 
+          className="mt-4 rounded-2xl bg-blue-600 px-8 py-3 font-bold text-white shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all"
+        >
+          Go Home
+        </button>
+      </div>
+    );
+  }
+
   const socialLinks = typeof user.social_links === 'string' ? JSON.parse(user.social_links || '{}') : (user.social_links || {});
 
   return (
@@ -408,7 +443,7 @@ export default function Profile({ user: initialUser }: { user: any }) {
               {error ? <X size={16} /> : <CheckCircle size={16} />}
             </div>
             <p className="font-semibold">{error || success}</p>
-            <button onClick={() => { setError(''); setSuccess(''); }} className="ml-4 opacity-50 hover:opacity-100 transition-opacity" title="Close notification" aria-label="Close notification">
+            <button onClick={() => { setError(''); setSuccess(''); }} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">
               <X size={18} />
             </button>
           </motion.div>
@@ -433,20 +468,24 @@ export default function Profile({ user: initialUser }: { user: any }) {
                 </div>
               )}
               <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                <button 
-                  onClick={() => coverInputRef.current?.click()} 
-                  className="rounded-full bg-white/20 backdrop-blur-md p-3 text-white hover:bg-white/40 transition-all"
-                  title="Upload Cover"
-                >
-                  <Camera size={20} />
-                </button>
-                <button 
-                  onClick={() => setIsEditing(true)} 
-                  className="rounded-full bg-white/20 backdrop-blur-md p-3 text-white hover:bg-white/40 transition-all"
-                  title="Edit Profile"
-                >
-                  <Settings size={20} />
-                </button>
+                {isOwnProfile && (
+                  <button 
+                    onClick={() => coverInputRef.current?.click()} 
+                    className="rounded-full bg-white/20 backdrop-blur-md p-3 text-white hover:bg-white/40 transition-all"
+                    title="Upload Cover"
+                  >
+                    <Camera size={20} />
+                  </button>
+                )}
+                {isOwnProfile && (
+                  <button 
+                    onClick={() => setIsEditing(true)} 
+                    className="rounded-full bg-white/20 backdrop-blur-md p-3 text-white hover:bg-white/40 transition-all"
+                    title="Edit Profile"
+                  >
+                    <Settings size={20} />
+                  </button>
+                )}
               </div>
               <input 
                 type="file" 
@@ -454,7 +493,6 @@ export default function Profile({ user: initialUser }: { user: any }) {
                 className="hidden" 
                 accept="image/*" 
                 onChange={(e) => handleFileChange(e, 'cover')} 
-                title="Upload Cover Image"
               />
             </div>
 
@@ -468,32 +506,33 @@ export default function Profile({ user: initialUser }: { user: any }) {
                       user?.name?.[0] || user?.email?.[0] || '?'
                     )}
                   </div>
-                  <button 
-                    onClick={() => avatarInputRef.current?.click()}
-                    className="absolute inset-1.5 rounded-[2rem] bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
-                    title="Upload Profile Picture"
-                    aria-label="Upload Profile Picture"
-                  >
-                    <Camera size={24} />
-                  </button>
+                  {isOwnProfile && (
+                    <button 
+                      onClick={() => avatarInputRef.current?.click()}
+                      className="absolute inset-1.5 rounded-[2rem] bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
+                    >
+                      <Camera size={24} />
+                    </button>
+                  )}
                   <input 
                     type="file" 
                     ref={avatarInputRef} 
                     className="hidden" 
                     accept="image/*" 
                     onChange={(e) => handleFileChange(e, 'avatar')} 
-                    title="Upload Profile Picture"
                   />
                 </div>
                 <div className="absolute bottom-0 right-0 lg:right-auto lg:left-24 flex gap-2">
-                  <motion.button 
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => setIsEditing(true)}
-                    className="rounded-2xl bg-white p-3 shadow-xl border border-slate-100 text-slate-600 hover:text-blue-600 transition-colors"
-                  >
-                    <Settings className="h-5 w-5" />
-                  </motion.button>
+                  {isOwnProfile && (
+                    <motion.button 
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => setIsEditing(true)}
+                      className="rounded-2xl bg-white p-3 shadow-xl border border-slate-100 text-slate-600 hover:text-blue-600 transition-colors"
+                    >
+                      <Settings className="h-5 w-5" />
+                    </motion.button>
+                  )}
                   <motion.button 
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.9 }}
@@ -535,22 +574,22 @@ export default function Profile({ user: initialUser }: { user: any }) {
                 {/* Social Links */}
                 <div className="flex items-center justify-center lg:justify-start gap-4 pt-2">
                   {socialLinks.twitter && (
-                    <a href={`https://twitter.com/${socialLinks.twitter}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-400 transition-colors" title="Twitter Profile" aria-label="Twitter Profile">
+                    <a href={`https://twitter.com/${socialLinks.twitter}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-400 transition-colors">
                       <Twitter size={18} />
                     </a>
                   )}
                   {socialLinks.instagram && (
-                    <a href={`https://instagram.com/${socialLinks.instagram}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-pink-500 transition-colors" title="Instagram Profile" aria-label="Instagram Profile">
+                    <a href={`https://instagram.com/${socialLinks.instagram}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-pink-500 transition-colors">
                       <Instagram size={18} />
                     </a>
                   )}
                   {socialLinks.whatsapp && (
-                    <a href={`https://wa.me/${socialLinks.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors" title="WhatsApp Contact" aria-label="WhatsApp Contact">
+                    <a href={`https://wa.me/${socialLinks.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors">
                       <MessageSquare size={18} />
                     </a>
                   )}
                   {socialLinks.website && (
-                    <a href={socialLinks.website.startsWith('http') ? socialLinks.website : `https://${socialLinks.website}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors" title="Website Link" aria-label="Website Link">
+                    <a href={socialLinks.website.startsWith('http') ? socialLinks.website : `https://${socialLinks.website}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors">
                       <Globe size={18} />
                     </a>
                   )}
@@ -579,7 +618,7 @@ export default function Profile({ user: initialUser }: { user: any }) {
                   </div>
                 </div>
 
-                {user.is_verified !== 1 && (
+                {isOwnProfile && user.is_verified !== 1 && (
                   <motion.button 
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
@@ -592,95 +631,99 @@ export default function Profile({ user: initialUser }: { user: any }) {
                 )}
 
                 {/* Account Actions / Danger Zone */}
-                <div className="pt-8 mt-8 border-t border-slate-100 space-y-4">
-                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Security</h3>
-                  
-                  <motion.button 
-                    whileHover={{ x: 5 }}
-                    onClick={() => setIsChangingPassword(true)}
-                    className="flex w-full items-center justify-between group rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-all"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-xl bg-white p-2 text-slate-400 group-hover:text-blue-500 shadow-sm transition-colors">
-                        <Lock size={16} />
+                {isOwnProfile && (
+                  <div className="pt-8 mt-8 border-t border-slate-100 space-y-4">
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Security</h3>
+                    
+                    <motion.button 
+                      whileHover={{ x: 5 }}
+                      onClick={() => setIsChangingPassword(true)}
+                      className="flex w-full items-center justify-between group rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-all"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="rounded-xl bg-white p-2 text-slate-400 group-hover:text-blue-500 shadow-sm transition-colors">
+                          <Lock size={16} />
+                        </div>
+                        Change Password
                       </div>
-                      Change Password
-                    </div>
-                    <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
-                  </motion.button>
+                      <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
+                    </motion.button>
 
-                  <motion.button 
-                    whileHover={{ x: 5 }}
-                    onClick={() => setIsChangingEmail(true)}
-                    className="flex w-full items-center justify-between group rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600 hover:bg-emerald-50 hover:text-emerald-600 transition-all"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-xl bg-white p-2 text-slate-400 group-hover:text-emerald-500 shadow-sm transition-colors">
-                        <Mail size={16} />
+                    <motion.button 
+                      whileHover={{ x: 5 }}
+                      onClick={() => setIsChangingEmail(true)}
+                      className="flex w-full items-center justify-between group rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600 hover:bg-emerald-50 hover:text-emerald-600 transition-all"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="rounded-xl bg-white p-2 text-slate-400 group-hover:text-emerald-500 shadow-sm transition-colors">
+                          <Mail size={16} />
+                        </div>
+                        Change Email
                       </div>
-                      Change Email
-                    </div>
-                    <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
-                  </motion.button>
+                      <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
+                    </motion.button>
 
-                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 pt-4">Account Management</h3>
-                  
-                  <motion.button 
-                    whileHover={{ x: 5 }}
-                    onClick={handleExportData}
-                    disabled={actionLoading}
-                    className="flex w-full items-center justify-between group rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-all"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-xl bg-white p-2 text-slate-400 group-hover:text-blue-500 shadow-sm transition-colors">
-                        <Download size={16} />
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 pt-4">Account Management</h3>
+                    
+                    <motion.button 
+                      whileHover={{ x: 5 }}
+                      onClick={handleExportData}
+                      disabled={actionLoading}
+                      className="flex w-full items-center justify-between group rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-all"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="rounded-xl bg-white p-2 text-slate-400 group-hover:text-blue-500 shadow-sm transition-colors">
+                          <Download size={16} />
+                        </div>
+                        Export My Data
                       </div>
-                      Export My Data
-                    </div>
-                    <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
-                  </motion.button>
+                      <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
+                    </motion.button>
 
-                  <motion.button 
-                    whileHover={{ x: 5 }}
-                    onClick={() => setIsDeleting(true)}
-                    className="flex w-full items-center justify-between group rounded-2xl bg-red-50/50 p-4 text-sm font-bold text-red-600 hover:bg-red-50 transition-all"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-xl bg-white p-2 text-red-400 group-hover:text-red-600 shadow-sm transition-colors">
-                        <Trash2 size={16} />
+                    <motion.button 
+                      whileHover={{ x: 5 }}
+                      onClick={() => setIsDeleting(true)}
+                      className="flex w-full items-center justify-between group rounded-2xl bg-red-50/50 p-4 text-sm font-bold text-red-600 hover:bg-red-50 transition-all"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="rounded-xl bg-white p-2 text-red-400 group-hover:text-red-600 shadow-sm transition-colors">
+                          <Trash2 size={16} />
+                        </div>
+                        Delete Account
                       </div>
-                      Delete Account
-                    </div>
-                    <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
-                  </motion.button>
-                </div>
+                      <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-all" />
+                    </motion.button>
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>
 
           {/* Quick Actions Bento */}
-          <div className="grid grid-cols-2 gap-4">
-            <motion.button 
-              whileHover={{ y: -4 }}
-              onClick={() => navigate('/orders')}
-              className="flex flex-col items-center justify-center gap-2 rounded-3xl bg-white p-6 shadow-lg shadow-slate-100 border border-slate-100 group"
-            >
-              <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                <ShoppingBag size={20} />
-              </div>
-              <span className="text-xs font-black text-slate-900 uppercase tracking-widest">Orders</span>
-            </motion.button>
-            <motion.button 
-              whileHover={{ y: -4 }}
-              onClick={() => navigate('/offers')}
-              className="flex flex-col items-center justify-center gap-2 rounded-3xl bg-white p-6 shadow-lg shadow-slate-100 border border-slate-100 group"
-            >
-              <div className="rounded-2xl bg-amber-50 p-3 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
-                <TrendingUp size={20} />
-              </div>
-              <span className="text-xs font-black text-slate-900 uppercase tracking-widest">Offers</span>
-            </motion.button>
-          </div>
+          {isOwnProfile && (
+            <div className="grid grid-cols-2 gap-4">
+              <motion.button 
+                whileHover={{ y: -4 }}
+                onClick={() => navigate('/orders')}
+                className="flex flex-col items-center justify-center gap-2 rounded-3xl bg-white p-6 shadow-lg shadow-slate-100 border border-slate-100 group"
+              >
+                <div className="rounded-2xl bg-blue-50 p-3 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                  <ShoppingBag size={20} />
+                </div>
+                <span className="text-xs font-black text-slate-900 uppercase tracking-widest">Orders</span>
+              </motion.button>
+              <motion.button 
+                whileHover={{ y: -4 }}
+                onClick={() => navigate('/offers')}
+                className="flex flex-col items-center justify-center gap-2 rounded-3xl bg-white p-6 shadow-lg shadow-slate-100 border border-slate-100 group"
+              >
+                <div className="rounded-2xl bg-amber-50 p-3 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+                  <TrendingUp size={20} />
+                </div>
+                <span className="text-xs font-black text-slate-900 uppercase tracking-widest">Offers</span>
+              </motion.button>
+            </div>
+          )}
 
           {/* Achievements / Badges */}
           <div className="rounded-[2rem] bg-slate-900 p-8 text-white space-y-6">
@@ -815,8 +858,6 @@ export default function Profile({ user: initialUser }: { user: any }) {
                           <button 
                             onClick={() => navigate(`/listing/${listing.id}`)}
                             className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-blue-600 hover:text-white transition-colors"
-                            title="View Listing"
-                            aria-label="View Listing"
                           >
                             <ExternalLink size={14} />
                           </button>
@@ -894,7 +935,7 @@ export default function Profile({ user: initialUser }: { user: any }) {
             >
               <div className="mb-8 flex items-center justify-between">
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">Edit Profile</h2>
-                <button onClick={() => setIsEditing(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" title="Close" aria-label="Close">
+                <button onClick={() => setIsEditing(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -908,8 +949,6 @@ export default function Profile({ user: initialUser }: { user: any }) {
                         value={editForm.name} 
                         onChange={(e) => setEditForm({...editForm, name: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
-                        title="Full Name"
-                        placeholder="Enter your full name"
                       />
                     </div>
                     <div className="space-y-2">
@@ -932,8 +971,6 @@ export default function Profile({ user: initialUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, bio: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         rows={3}
-                        title="Bio"
-                        placeholder="Tell us about yourself"
                       />
                     </div>
                   </div>
@@ -966,8 +1003,6 @@ export default function Profile({ user: initialUser }: { user: any }) {
                         value={editForm.location} 
                         onChange={(e) => setEditForm({...editForm, location: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
-                        title="Location"
-                        placeholder="Location"
                       />
                     </div>
                     <div className="space-y-2">
@@ -977,8 +1012,6 @@ export default function Profile({ user: initialUser }: { user: any }) {
                         value={editForm.dob} 
                         onChange={(e) => setEditForm({...editForm, dob: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
-                        title="Date of Birth"
-                        placeholder="Date of Birth"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1076,7 +1109,7 @@ export default function Profile({ user: initialUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Verification</h2>
                 </div>
-                <button onClick={() => setIsVerifying(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" title="Close" aria-label="Close">
+                <button onClick={() => setIsVerifying(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -1144,7 +1177,7 @@ export default function Profile({ user: initialUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Delete Account</h2>
                 </div>
-                <button onClick={() => setIsDeleting(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" title="Close" aria-label="Close">
+                <button onClick={() => setIsDeleting(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -1212,7 +1245,7 @@ export default function Profile({ user: initialUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Password</h2>
                 </div>
-                <button onClick={() => setIsChangingPassword(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" title="Close" aria-label="Close">
+                <button onClick={() => setIsChangingPassword(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -1299,7 +1332,7 @@ export default function Profile({ user: initialUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Email</h2>
                 </div>
-                <button onClick={() => setIsChangingEmail(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" title="Close" aria-label="Close">
+                <button onClick={() => setIsChangingEmail(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>

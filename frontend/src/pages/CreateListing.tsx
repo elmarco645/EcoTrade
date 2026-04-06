@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Camera, MapPin, DollarSign, Loader2, ArrowLeft, X, AlertCircle } from 'lucide-react';
-import { auth } from '../firebase';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { storage, auth } from '../firebase';
 import LocationSelector from '../components/LocationSelector';
 
 export default function CreateListing({ user }: { user: any }) {
@@ -22,6 +23,18 @@ export default function CreateListing({ user }: { user: any }) {
     images: [] as string[]
   });
 
+  const [locationData, setLocationData] = useState({
+    county: '',
+    subcounty: '',
+    ward: ''
+  });
+
+  const handleLocationChange = (loc: { county: string; subcounty: string; ward: string }) => {
+    setLocationData(loc);
+    const locationString = [loc.county, loc.subcounty, loc.ward].filter(Boolean).join(', ');
+    setFormData(prev => ({ ...prev, location: locationString }));
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -38,7 +51,7 @@ export default function CreateListing({ user }: { user: any }) {
     console.log('[UPLOAD] Starting upload for', files.length, 'files');
 
     try {
-      const uploadData = new FormData();
+      const urls: string[] = [];
       
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -47,25 +60,37 @@ export default function CreateListing({ user }: { user: any }) {
         if (file.size > 5 * 1024 * 1024) {
           throw new Error(`File ${file.name} is too large. Max size is 5MB.`);
         }
-        uploadData.append('images', file);
-      }
 
-      const res = await fetch('/api/listings/upload-images', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: uploadData
-      });
+        console.log('[UPLOAD] Uploading file:', file.name, 'size:', file.size);
+        const storageRef = ref(storage, `listings/${auth.currentUser?.uid}/${Date.now()}_${file.name}`);
+        
+        const uploadTask = uploadBytesResumable(storageRef, file);
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to upload images');
+        const url = await new Promise<string>((resolve, reject) => {
+          uploadTask.on('state_changed', 
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              setUploadProgress(progress);
+              console.log(`[UPLOAD] Progress for ${file.name}: ${progress}%`);
+            }, 
+            (error) => {
+              console.error('[UPLOAD ERROR] Task failed:', error);
+              reject(error);
+            }, 
+            async () => {
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(downloadURL);
+            }
+          );
+        });
+
+        urls.push(url);
+        console.log('[UPLOAD] File uploaded successfully:', file.name, 'URL:', url);
       }
 
       setFormData(prev => ({
         ...prev,
-        images: [...prev.images, ...data.urls]
+        images: [...prev.images, ...urls]
       }));
     } catch (err: any) {
       console.error('[UPLOAD ERROR] Detailed error:', err);
@@ -145,7 +170,6 @@ export default function CreateListing({ user }: { user: any }) {
         {/* Image Upload */}
         <div className="space-y-4">
           <input
-            aria-label="Upload Listing Images" placeholder="Upload Images" title="Upload Images"
             type="file"
             multiple
             accept="image/*"
@@ -178,7 +202,6 @@ export default function CreateListing({ user }: { user: any }) {
                 <div key={index} className="group relative aspect-square overflow-hidden rounded-2xl bg-slate-100">
                   <img src={url} alt="" className="h-full w-full object-cover" />
                   <button
-                    aria-label="Remove Image" title="Remove Image"
                     type="button"
                     onClick={() => removeImage(index)}
                     className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-white opacity-0 transition-opacity group-hover:opacity-100"
@@ -208,7 +231,6 @@ export default function CreateListing({ user }: { user: any }) {
             <div className="space-y-2">
               <label className="text-sm font-bold text-slate-700">Category</label>
               <select
-                aria-label="Category" title="Category"
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-6 outline-none focus:border-blue-500 focus:bg-white"
                 value={formData.category}
                 onChange={e => setFormData({...formData, category: e.target.value})}
@@ -223,7 +245,6 @@ export default function CreateListing({ user }: { user: any }) {
             <div className="space-y-2">
               <label className="text-sm font-bold text-slate-700">Condition</label>
               <select
-                aria-label="Condition" title="Condition"
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-6 outline-none focus:border-blue-500 focus:bg-white"
                 value={formData.condition}
                 onChange={e => setFormData({...formData, condition: e.target.value})}
@@ -263,10 +284,11 @@ export default function CreateListing({ user }: { user: any }) {
                 />
               </div>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-2">
               <label className="text-sm font-bold text-slate-700">Location</label>
               <LocationSelector 
-                onChange={(loc) => setFormData({...formData, location: `${loc.county}, ${loc.subcounty}${loc.ward ? ', ' + loc.ward : ''}`})} 
+                onChange={handleLocationChange}
+                initialLocation={locationData}
               />
             </div>
           </div>
