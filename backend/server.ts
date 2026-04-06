@@ -18,20 +18,69 @@ import { getFirestore } from 'firebase-admin/firestore';
 
 import firebaseConfig from '../firebase-applet-config.json' assert { type: 'json' };
 
+let databaseId: string;
+let firestore: admin.firestore.Firestore;
+
 console.log('[SERVER] Initializing Firebase Admin...');
 try {
-  const projectId = process.env.FIREBASE_PROJECT_ID || 
-                    process.env.GOOGLE_CLOUD_PROJECT || 
-                    firebaseConfig.projectId;
-  
-  console.log(`[SERVER] Firebase Project ID: ${projectId}`);
-  
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+  console.log(`[SERVER] Environment Check:`);
+  console.log(`[SERVER] - GOOGLE_CLOUD_PROJECT: ${process.env.GOOGLE_CLOUD_PROJECT || 'not set'}`);
+  console.log(`[SERVER] - FIREBASE_PROJECT_ID: ${process.env.FIREBASE_PROJECT_ID || 'not set'}`);
+  console.log(`[SERVER] - VITE_FIREBASE_PROJECT_ID: ${process.env.VITE_FIREBASE_PROJECT_ID || 'not set'}`);
+  console.log(`[SERVER] - Service Account: ${clientEmail ? 'Present' : 'Missing'}`);
+
+  let projectId: string;
+  let source: string;
+
+  if (clientEmail && privateKey) {
+    // If we have a service account, we can use any project ID specified
+    // If not specified, try to extract it from the client email
+    const extractedProjectId = clientEmail.split('@')[1]?.split('.')[0];
+    
+    projectId = process.env.FIREBASE_PROJECT_ID || 
+                process.env.VITE_FIREBASE_PROJECT_ID || 
+                extractedProjectId ||
+                firebaseConfig.projectId;
+    
+    source = process.env.FIREBASE_PROJECT_ID ? 'FIREBASE_PROJECT_ID (Service Account)' :
+             process.env.VITE_FIREBASE_PROJECT_ID ? 'VITE_FIREBASE_PROJECT_ID (Service Account)' :
+             extractedProjectId ? 'extracted from clientEmail (Service Account)' :
+             'config (Service Account)';
+  } else {
+    // If no service account, we should ideally let admin.initializeApp() pick up the environment project.
+    // But we still want to know what we're aiming for.
+    projectId = process.env.GOOGLE_CLOUD_PROJECT || 
+                process.env.FIREBASE_PROJECT_ID ||
+                process.env.VITE_FIREBASE_PROJECT_ID ||
+                firebaseConfig.projectId;
+    source = process.env.GOOGLE_CLOUD_PROJECT ? 'GOOGLE_CLOUD_PROJECT (ADC)' : 
+             process.env.FIREBASE_PROJECT_ID ? 'FIREBASE_PROJECT_ID (ADC)' :
+             process.env.VITE_FIREBASE_PROJECT_ID ? 'VITE_FIREBASE_PROJECT_ID (ADC)' :
+             'config (ADC)';
+  }
+  
+  console.log(`[SERVER] Target Firebase Project ID: ${projectId} (Source: ${source})`);
+  
+  // Use environment variable for database ID if available, otherwise fallback to config or (default)
+  // If we have a service account, we should probably default to '(default)' unless explicitly overridden
+  databaseId = process.env.FIREBASE_DATABASE_ID || 
+                    process.env.VITE_FIREBASE_DATABASE_ID ||
+                    (clientEmail ? '(default)' : firebaseConfig.firestoreDatabaseId) || 
+                    '(default)';
+
+  const dbSource = process.env.FIREBASE_DATABASE_ID ? 'FIREBASE_DATABASE_ID' :
+                   process.env.VITE_FIREBASE_DATABASE_ID ? 'VITE_FIREBASE_DATABASE_ID' :
+                   (clientEmail && !process.env.FIREBASE_DATABASE_ID) ? 'service account default' :
+                   firebaseConfig.firestoreDatabaseId ? 'config' : 'default';
+
+  console.log(`[SERVER] Firebase Database ID: ${databaseId} (Source: ${dbSource})`);
   
   if (!admin.apps.length) {
     if (clientEmail && privateKey) {
-      console.log('[SERVER] Firebase Admin: Using service account from environment variables');
+      console.log('[SERVER] Firebase Admin: Initializing with service account...');
       const formattedKey = privateKey.replace(/\\n/g, '\n').replace(/^["']|["']$/g, '');
       admin.initializeApp({
         credential: admin.credential.cert({
@@ -42,26 +91,87 @@ try {
         projectId
       });
     } else {
-      console.log('[SERVER] Firebase Admin: Using default initialization (ADC or Project ID)');
-      admin.initializeApp({
-        projectId
-      });
+      console.log('[SERVER] Firebase Admin: Initializing with Application Default Credentials (ADC)...');
+      // In AI Studio, initializing without arguments is the most reliable way to use the container's identity.
+      // It automatically picks up the project ID and credentials from the environment.
+      admin.initializeApp();
+      
+      // If GOOGLE_CLOUD_PROJECT is set, we should use it as the projectId for logging
+      if (process.env.GOOGLE_CLOUD_PROJECT) {
+        projectId = process.env.GOOGLE_CLOUD_PROJECT;
+        console.log(`[SERVER] Using GOOGLE_CLOUD_PROJECT: ${projectId}`);
+      }
     }
   }
-  console.log(`[SERVER] Firebase Admin initialized for project: ${admin.app().options.projectId}`);
-} catch (error) {
-  console.error('[SERVER] Failed to initialize Firebase Admin:', error);
+  
+  const currentApp = admin.app();
+  console.log(`[SERVER] Firebase Admin initialized. Project: ${currentApp.options.projectId}`);
+  
+  // Verify if we have a credential
+  if (!currentApp.options.credential && !clientEmail) {
+    console.warn('[SERVER] WARNING: No explicit credential provided. Admin SDK will rely on Application Default Credentials (ADC).');
+  }
+
+  firestore = getFirestore(currentApp, databaseId);
+  console.log(`[SERVER] Firestore initialized for database: ${databaseId} in project: ${currentApp.options.projectId}`);
+
+  // Test Firestore connection on startup
+  const testFirestore = async () => {
+    try {
+      console.log(`[SERVER] Testing Firestore connection (Database: ${databaseId})...`);
+      // Try a simple operation to verify connection
+      await firestore.listCollections();
+      console.log(`[SERVER] Firestore connection test successful.`);
+    } catch (error: any) {
+      console.error('[SERVER] Firestore connection test failed:');
+      const isUnauthenticated = error.code === 16 || error.message?.includes('UNAUTHENTICATED');
+      const isNotFound = error.code === 5 || error.message?.includes('NOT_FOUND');
+
+      if (isUnauthenticated) {
+        console.error('[SERVER] ERROR 16: UNAUTHENTICATED. This usually means the Project ID is incorrect or the environment lacks permissions.');
+      } else if (isNotFound) {
+        console.error(`[SERVER] ERROR 5: NOT_FOUND. The database "${databaseId}" was not found in project "${projectId}".`);
+      }
+
+      if (isUnauthenticated || isNotFound) {
+        console.error(`[SERVER] Current Project ID: ${projectId}`);
+        console.error(`[SERVER] Current Database ID: ${databaseId}`);
+        
+        // Try to re-initialize with (default) database if it fails and it's not (default)
+        if (databaseId !== '(default)') {
+          console.log('[SERVER] Attempting fallback to (default) database...');
+          try {
+            const defaultFirestore = getFirestore(currentApp, '(default)');
+            // Use a simpler check that doesn't rely on a specific collection
+            await defaultFirestore.listCollections();
+            console.log('[SERVER] Fallback to (default) database successful. Updating global firestore instance.');
+            firestore = defaultFirestore;
+            databaseId = '(default)';
+          } catch (fallbackError: any) {
+            console.error('[SERVER] Fallback to (default) database also failed:', fallbackError.message);
+          }
+        }
+      } else {
+        console.error('[SERVER] Error details:', error.message);
+      }
+    }
+  };
+  
+  // Wait for Firestore test to complete before moving on
+  await testFirestore();
+  
+  // Trigger debug info on startup
+  setTimeout(async () => {
+    try {
+      const response = await axios.get(`http://localhost:3000/api/debug/firebase`);
+      console.log('[STARTUP] Firebase Debug Info:', JSON.stringify(response.data, null, 2));
+    } catch (err: any) {
+      console.error('[STARTUP] Failed to get debug info:', err.message);
+    }
+  }, 5000);
+} catch (error: any) {
+  console.error('[SERVER] Failed to initialize Firebase Admin:', error.message);
 }
-
-// Use environment variable for database ID if available, otherwise fallback to config or (default)
-const databaseId = process.env.FIREBASE_DATABASE_ID || 
-                  firebaseConfig.firestoreDatabaseId || 
-                  '(default)';
-
-console.log(`[SERVER] Firebase Database ID: ${databaseId}`);
-
-const firestore = getFirestore(admin.app(), databaseId);
-console.log(`[SERVER] Firestore initialized for database: ${databaseId} in project: ${admin.app().options.projectId}`);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET;
@@ -275,6 +385,40 @@ async function startServer() {
         firestore: firestoreStatus
       }
     });
+  });
+
+  // --- Debug Routes ---
+  app.get('/api/debug/firebase', async (req, res) => {
+    try {
+      const currentApp = admin.app();
+      const status = {
+        projectId: currentApp.options.projectId || process.env.GOOGLE_CLOUD_PROJECT || 'unknown',
+        databaseId: databaseId,
+        hasCredential: !!currentApp.options.credential,
+        env: {
+          GOOGLE_CLOUD_PROJECT: process.env.GOOGLE_CLOUD_PROJECT || 'not set',
+          FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || 'not set',
+          VITE_FIREBASE_PROJECT_ID: process.env.VITE_FIREBASE_PROJECT_ID || 'not set',
+          FIREBASE_DATABASE_ID: process.env.FIREBASE_DATABASE_ID || 'not set',
+          VITE_FIREBASE_DATABASE_ID: process.env.VITE_FIREBASE_DATABASE_ID || 'not set',
+          hasServiceAccount: !!(process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY)
+        }
+      };
+      
+      // Try a simple Firestore operation
+      try {
+        await firestore.collection('_health_check').doc('ping').get();
+        (status as any).firestore = 'connected';
+      } catch (err: any) {
+        (status as any).firestore = `error: ${err.message}`;
+        (status as any).firestoreCode = err.code;
+      }
+      
+      res.json(status);
+      console.log('[DEBUG] Firebase Status:', JSON.stringify(status, null, 2));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // --- Auth Routes ---
@@ -944,37 +1088,73 @@ async function startServer() {
   app.get('/api/listings', async (req, res) => {
     try {
       console.log('[API] Fetching all listings...');
-      console.log(`[API] Using Firestore project: ${admin.app().options.projectId}`);
+      const currentApp = admin.app();
+      console.log(`[API] Using Firestore project: ${currentApp.options.projectId}`);
       console.log(`[API] Using Firestore database: ${databaseId}`);
-      const listingsSnapshot = await firestore.collection('listings')
-        .where('status', '!=', 'sold')
-        .orderBy('status')
-        .orderBy('created_at', 'desc')
-        .get();
+      
+      if (!firestore) {
+        console.error('[API ERROR] Firestore instance is not initialized!');
+        return res.status(500).json({ error: 'Firestore not initialized' });
+      }
+
+      let query = firestore.collection('listings')
+        .where('status', '!=', 'sold');
+
+      // Try basic query first if composite index might be missing
+      const listingsSnapshot = await query.get();
       
       const listings = await Promise.all(listingsSnapshot.docs.map(async (doc) => {
         const data = doc.data();
         const sellerDoc = await firestore.collection('users').doc(data.seller_id).get();
         const sellerData = sellerDoc.data();
+        
+        // Convert timestamps to ISO strings for the frontend
+        const created_at = data.created_at?.toDate ? data.created_at.toDate().toISOString() : null;
+        const updated_at = data.updated_at?.toDate ? data.updated_at.toDate().toISOString() : null;
+
         return {
           ...data,
           id: doc.id,
+          created_at,
+          updated_at,
           seller_name: sellerData?.name,
           seller_avatar: sellerData?.avatar_url || sellerData?.avatar,
           is_seller_verified: sellerData?.is_seller_verified
         };
       }));
 
+      // Sort manually in memory
+      listings.sort((a, b) => {
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return bTime - aTime;
+      });
+
       console.log(`[API] Found ${listings.length} listings`);
       res.json(listings);
     } catch (error: any) {
       console.error('[API ERROR] Failed to fetch listings:', error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const isAuthError = errorMessage.includes('UNAUTHENTICATED') || errorMessage.includes('permission_denied');
+      
+      const isNotFound = error.code === 5 || error.message?.includes('NOT_FOUND');
+      const isUnauthenticated = error.code === 16 || error.message?.includes('UNAUTHENTICATED');
+      
+      let errorMessage = 'Failed to fetch listings';
+      let errorDetails = error.message;
+      
+      if (isNotFound) {
+        errorMessage = `Database not found. Please check your Firebase configuration.`;
+        errorDetails = `The database "${databaseId}" was not found in project "${admin.app().options.projectId}". If you are using an external project, ensure you have created a Firestore database (usually named "(default)").`;
+      } else if (isUnauthenticated) {
+        errorMessage = `Authentication failed. Please check your service account credentials.`;
+        errorDetails = `The backend was unable to authenticate with project "${admin.app().options.projectId}". Ensure your FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY are correct.`;
+      }
+
       res.status(500).json({ 
-        error: 'Failed to fetch listings',
-        details: isAuthError ? 'Authentication error. Please check backend credentials and Firestore database ID.' : errorMessage,
-        code: error.code || 'unknown'
+        error: errorMessage,
+        details: errorDetails,
+        code: error.code || 'unknown',
+        projectId: admin.app().options.projectId,
+        databaseId: databaseId
       });
     }
   });
@@ -1676,10 +1856,16 @@ async function startServer() {
       
       const reviews = [];
       for (const doc of reviewsSnap.docs) {
-        const r = { ...doc.data(), id: doc.id };
-        const buyerDoc = await firestore.collection('users').doc(r.buyer_id).get();
+        const data = doc.data();
+        const buyerDoc = await firestore.collection('users').doc(data.buyer_id).get();
+        
+        // Convert timestamp to ISO string
+        const created_at = data.created_at?.toDate ? data.created_at.toDate().toISOString() : null;
+
         reviews.push({
-          ...r,
+          ...data,
+          id: doc.id,
+          created_at,
           buyer_name: buyerDoc.data()?.name,
           buyer_avatar: buyerDoc.data()?.avatar_url
         });
