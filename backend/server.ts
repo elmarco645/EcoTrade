@@ -1269,6 +1269,31 @@ async function startServer() {
     }
   });
 
+  app.patch('/api/listings/:id', authenticateToken, async (req: any, res) => {
+    const { title, description, category, condition, price, is_negotiable, location, images } = req.body;
+    try {
+      const listingRef = firestore.collection('listings').doc(req.params.id);
+      const listingSnap = await listingRef.get();
+      if (!listingSnap.exists) return res.status(404).json({ error: 'Listing not found' });
+      if (listingSnap.data()?.seller_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized to edit this listing' });
+
+      await listingRef.update({
+        title,
+        description,
+        category,
+        condition,
+        price: parseFloat(price),
+        is_negotiable: !!is_negotiable,
+        location,
+        images: images || [],
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+      res.json({ success: true, id: req.params.id });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   // --- Offer Routes ---
   app.post('/api/offers', authenticateToken, async (req: any, res) => {
     const { listing_id, amount } = req.body;

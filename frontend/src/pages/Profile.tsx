@@ -6,7 +6,8 @@ import {
   AtSign, X, Save, Fingerprint, ExternalLink, 
   TrendingUp, ShoppingBag, Heart, MoreHorizontal,
   Twitter, Instagram, Globe, Share2, Camera,
-  ChevronRight, Award, Zap, Shield, Download, Trash2, Lock, Mail, Key
+  ChevronRight, Award, Zap, Shield, Download, Trash2, Lock, Mail, Key,
+  Edit2, Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { updatePassword, verifyBeforeUpdateEmail, deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
@@ -783,22 +784,35 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
           {/* Tabs & Content */}
           <div className="space-y-6">
             <div className="flex items-center justify-between border-b border-slate-100 relative">
-              <div className="flex gap-8">
-                {['listings', 'reviews'].map((tab) => (
-                  <button 
-                    key={tab}
-                    onClick={() => setActiveTab(tab as any)}
-                    className={`relative pb-4 text-sm font-black uppercase tracking-widest transition-colors ${activeTab === tab ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+              <div className="flex items-center gap-8">
+                <div className="flex gap-8">
+                  {['listings', 'reviews'].map((tab) => (
+                    <button 
+                      key={tab}
+                      onClick={() => setActiveTab(tab as any)}
+                      className={`relative pb-4 text-sm font-black uppercase tracking-widest transition-colors ${activeTab === tab ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                      {tab} ({tab === 'listings' ? listings.length : reviews.length})
+                      {activeTab === tab && (
+                        <motion.div 
+                          layoutId="activeTab"
+                          className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
+                        />
+                      )}
+                    </button>
+                  ))}
+                </div>
+                {isOwnProfile && activeTab === 'listings' && (
+                  <motion.button
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    onClick={() => navigate('/create-listing')}
+                    className="mb-4 flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all"
                   >
-                    {tab} ({tab === 'listings' ? listings.length : reviews.length})
-                    {activeTab === tab && (
-                      <motion.div 
-                        layoutId="activeTab"
-                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
-                      />
-                    )}
-                  </button>
-                ))}
+                    <Plus size={14} />
+                    Add Listing
+                  </motion.button>
+                )}
               </div>
             </div>
 
@@ -855,12 +869,26 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         </div>
                         <div className="mt-4 flex items-center justify-between pt-4 border-t border-slate-50">
                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{listing.condition}</span>
-                          <button 
-                            onClick={() => navigate(`/listing/${listing.id}`)}
-                            className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-blue-600 hover:text-white transition-colors"
-                          >
-                            <ExternalLink size={14} />
-                          </button>
+                          <div className="flex gap-2">
+                            {isOwnProfile && (
+                              <button 
+                                onClick={() => navigate(`/edit-listing/${listing.id}`)}
+                                className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-emerald-600 hover:text-white transition-colors"
+                                title="Edit Listing"
+                                aria-label="Edit Listing"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                            )}
+                            <button 
+                              onClick={() => navigate(`/listing/${listing.id}`)}
+                              className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-blue-600 hover:text-white transition-colors"
+                              title="View Listing"
+                              aria-label="View Listing"
+                            >
+                              <ExternalLink size={14} />
+                            </button>
+                          </div>
                         </div>
                       </motion.div>
                     ))}
