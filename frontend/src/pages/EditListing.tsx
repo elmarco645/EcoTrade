@@ -223,6 +223,8 @@ export default function EditListing({ user }: { user: any }) {
                   <button
                     type="button"
                     onClick={() => removeImage(index)}
+                    title="Remove Image"
+                    aria-label="Remove Image"
                     className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-white opacity-0 transition-opacity group-hover:opacity-100 shadow-lg"
                   >
                     <X className="h-4 w-4" />
