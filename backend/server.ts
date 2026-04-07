@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
@@ -18,27 +18,47 @@ import { getFirestore } from 'firebase-admin/firestore';
 
 import firebaseConfig from '../firebase-applet-config.json' assert { type: 'json' };
 
+dotenv.config({ path: '.env' });
+dotenv.config({ path: '.env.local', override: true });
+
 let databaseId: string;
 let firestore: admin.firestore.Firestore;
+
+function resolveFirestoreDatabaseId() {
+  const configuredId =
+    process.env.FIREBASE_DATABASE_ID ||
+    process.env.FIRESTORE_DATABASE_ID ||
+    process.env.VITE_FIREBASE_DATABASE_ID ||
+    firebaseConfig.firestoreDatabaseId;
+
+  if (!configuredId || configuredId === '(default)') {
+    return '(default)';
+  }
+
+  return configuredId;
+}
 
 console.log('[SERVER] Initializing Firebase Admin...');
 try {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const hasCredentialsFile = !!credentialsPath && fs.existsSync(credentialsPath);
 
   console.log(`[SERVER] Environment Check:`);
   console.log(`[SERVER] - GOOGLE_CLOUD_PROJECT: ${process.env.GOOGLE_CLOUD_PROJECT || 'not set'}`);
   console.log(`[SERVER] - FIREBASE_PROJECT_ID: ${process.env.FIREBASE_PROJECT_ID || 'not set'}`);
   console.log(`[SERVER] - VITE_FIREBASE_PROJECT_ID: ${process.env.VITE_FIREBASE_PROJECT_ID || 'not set'}`);
-  console.log(`[SERVER] - Service Account: ${clientEmail ? 'Present' : 'Missing'}`);
+  console.log(`[SERVER] - Service Account Env: ${clientEmail ? 'Present' : 'Missing'}`);
+  console.log(`[SERVER] - Service Account File: ${hasCredentialsFile ? credentialsPath : 'missing'}`);
 
   let projectId: string;
   let source: string;
 
-  if (clientEmail && privateKey) {
+  if (hasCredentialsFile || (clientEmail && privateKey)) {
     // If we have a service account, we can use any project ID specified
     // If not specified, try to extract it from the client email
-    const extractedProjectId = clientEmail.split('@')[1]?.split('.')[0];
+    const extractedProjectId = clientEmail?.split('@')[1]?.split('.')[0];
     
     projectId = process.env.FIREBASE_PROJECT_ID || 
                 process.env.VITE_FIREBASE_PROJECT_ID || 
@@ -66,21 +86,24 @@ try {
   
   // Use environment variable for database ID if available, otherwise fallback to config or (default)
   // If we have a service account, we should probably default to '(default)' unless explicitly overridden
-  databaseId = process.env.FIREBASE_DATABASE_ID || 
-                    process.env.VITE_FIREBASE_DATABASE_ID ||
-                    (clientEmail ? '(default)' : firebaseConfig.firestoreDatabaseId) || 
-                    '(default)';
+  databaseId = resolveFirestoreDatabaseId();
 
   const dbSource = process.env.FIREBASE_DATABASE_ID ? 'FIREBASE_DATABASE_ID' :
+                   process.env.FIRESTORE_DATABASE_ID ? 'FIRESTORE_DATABASE_ID' :
                    process.env.VITE_FIREBASE_DATABASE_ID ? 'VITE_FIREBASE_DATABASE_ID' :
-                   (clientEmail && !process.env.FIREBASE_DATABASE_ID) ? 'service account default' :
-                   firebaseConfig.firestoreDatabaseId ? 'config' : 'default';
+                   firebaseConfig.firestoreDatabaseId ? 'config/default fallback' : 'default';
 
   console.log(`[SERVER] Firebase Database ID: ${databaseId} (Source: ${dbSource})`);
   
   if (!admin.apps.length) {
-    if (clientEmail && privateKey) {
-      console.log('[SERVER] Firebase Admin: Initializing with service account...');
+    if (hasCredentialsFile) {
+      console.log('[SERVER] Firebase Admin: Initializing with service account file...');
+      admin.initializeApp({
+        credential: admin.credential.applicationDefault(),
+        projectId
+      });
+    } else if (clientEmail && privateKey) {
+      console.log('[SERVER] Firebase Admin: Initializing with service account env vars...');
       const formattedKey = privateKey.replace(/\\n/g, '\n').replace(/^["']|["']$/g, '');
       admin.initializeApp({
         credential: admin.credential.cert({
@@ -246,6 +269,12 @@ const sendDeleteUndoEmail = async (email: string, token: string, origin: string)
 
 const verifyCaptcha = async (token: string) => {
   if (!RECAPTCHA_SECRET) return true; // Skip if not configured for demo
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    RECAPTCHA_SECRET === '6LdEwY8sAAAAALZ0ulsT-tFnPP0U7pg1EhvoFgka'
+  ) {
+    return true;
+  }
   try {
     const res = await axios.post(
       `https://www.google.com/recaptcha/api/siteverify`,
@@ -262,6 +291,18 @@ const verifyCaptcha = async (token: string) => {
     console.error('reCAPTCHA verification error:', error);
     return false;
   }
+};
+
+const shouldRequireCaptcha = () => {
+  if (!RECAPTCHA_SECRET) return false;
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    RECAPTCHA_SECRET === '6LdEwY8sAAAAALZ0ulsT-tFnPP0U7pg1EhvoFgka'
+  ) {
+    return false;
+  }
+
+  return true;
 };
 
 async function startServer() {
@@ -524,6 +565,97 @@ async function startServer() {
     return "username";
   }
 
+  app.post('/api/auth/demo-login', async (req, res) => {
+    const { email, password, captchaToken } = req.body;
+    const normalizedEmail = String(email || '').toLowerCase().trim();
+    const isKnownDemoAccount = ['alice@example.com', 'bob@example.com', 'nefaryus@example.com'].includes(normalizedEmail);
+
+    try {
+      if (shouldRequireCaptcha() && !captchaToken) {
+        return res.status(400).json({ error: 'CAPTCHA verification required' });
+      }
+
+      const isCaptchaValid = await verifyCaptcha(captchaToken);
+      if (!isCaptchaValid) {
+        return res.status(400).json({ error: 'Invalid CAPTCHA' });
+      }
+
+      if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password are required' });
+      }
+
+      const userQuery = await firestore
+        .collection('users')
+        .where('email', '==', normalizedEmail)
+        .limit(1)
+        .get();
+
+      if (userQuery.empty || !userQuery.docs[0]) {
+        return res.status(401).json({ error: 'Email or password is incorrect' });
+      }
+
+      const userDoc = userQuery.docs[0];
+      let user = userDoc.data();
+
+      let isPasswordValid = false;
+
+      if (user?.password) {
+        isPasswordValid = await bcrypt.compare(password, user.password);
+      }
+
+      if (!isPasswordValid && isKnownDemoAccount && password === 'password123') {
+        const seededPassword = bcrypt.hashSync('password123', 10);
+        await userDoc.ref.set(
+          {
+            email: normalizedEmail,
+            password: seededPassword,
+            is_email_verified: true,
+            name: user?.name || normalizedEmail.split('@')[0],
+            username: user?.username || normalizedEmail.split('@')[0],
+            updated_at: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        user = { ...user, password: seededPassword, email: normalizedEmail, is_email_verified: true };
+        isPasswordValid = true;
+      }
+
+      if (!isPasswordValid) {
+        return res.status(401).json({ error: 'Email or password is incorrect' });
+      }
+
+      if (user?.deleted_at) {
+        return res.status(403).json({ error: 'Account scheduled for deletion' });
+      }
+
+      try {
+        const authUser = await admin.auth().getUserByEmail(normalizedEmail);
+        await admin.auth().updateUser(authUser.uid, {
+          password,
+          emailVerified: true,
+          displayName: user?.name || user?.username || 'EcoTrade User',
+        });
+      } catch (error: any) {
+        if (error.code === 'auth/user-not-found') {
+          await admin.auth().createUser({
+            uid: userDoc.id,
+            email: normalizedEmail,
+            password,
+            emailVerified: true,
+            displayName: user?.name || user?.username || 'EcoTrade User',
+          });
+        } else {
+          throw error;
+        }
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('[DEMO LOGIN ERROR]', error);
+      res.status(500).json({ error: error.message || 'Demo login failed' });
+    }
+  });
+
   app.post('/api/auth/login', async (req, res) => {
     const { captchaToken } = req.body;
     const authHeader = req.headers['authorization'];
@@ -531,7 +663,7 @@ async function startServer() {
 
     try {
       // Verify CAPTCHA
-      if (RECAPTCHA_SECRET && !captchaToken) {
+      if (shouldRequireCaptcha() && !captchaToken) {
         return res.status(400).json({ error: 'CAPTCHA verification required' });
       }
       const isCaptchaValid = await verifyCaptcha(captchaToken);
