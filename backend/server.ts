@@ -320,6 +320,7 @@ async function startServer() {
 
   // Apply sensitive action limiter to specific endpoints
   app.post('/api/listings', sensitiveActionLimiter);
+  app.post('/api/listings/upload-images', sensitiveActionLimiter);
   app.post('/api/offers', sensitiveActionLimiter);
   app.post('/api/wallet/deposit', sensitiveActionLimiter);
   app.post('/api/wallet/withdraw', sensitiveActionLimiter);
@@ -979,6 +980,17 @@ async function startServer() {
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
+  });
+
+  app.post('/api/listings/upload-images', authenticateToken, upload.array('images', 8), async (req: any, res) => {
+    const files = Array.isArray(req.files) ? req.files : [];
+
+    if (files.length === 0) {
+      return res.status(400).json({ error: 'No images uploaded' });
+    }
+
+    const urls = files.map((file: Express.Multer.File) => `/uploads/${file.filename}`);
+    res.json({ success: true, urls });
   });
 
   app.post('/api/user/verify-id', authenticateToken, async (req: any, res) => {

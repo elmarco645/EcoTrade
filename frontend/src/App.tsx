@@ -179,8 +179,8 @@ export default function App() {
               path="/offers" 
               element={user ? <Offers user={user} /> : <Navigate to="/login" />} 
             />
-            <Route path="/login" element={<Login setUser={setUser} />} />
-            <Route path="/register" element={<Register setUser={setUser} />} />
+            <Route path="/login" element={user ? <Navigate to="/profile" /> : <Login setUser={setUser} />} />
+            <Route path="/register" element={user ? <Navigate to="/profile" /> : <Register setUser={setUser} />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
