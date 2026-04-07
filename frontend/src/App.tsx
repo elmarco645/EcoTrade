@@ -13,6 +13,7 @@ import Home from './pages/Home';
 import Marketplace from './pages/Marketplace';
 import ListingDetail from './pages/ListingDetail';
 import CreateListing from './pages/CreateListing';
+import EditListing from './pages/EditListing';
 import Profile from './pages/Profile';
 import Wallet from './pages/Wallet';
 import Chat from './pages/Chat';
@@ -153,7 +154,7 @@ export default function App() {
             />
             <Route 
               path="/edit-listing/:id" 
-              element={user ? <CreateListing user={user} /> : <Navigate to="/login" />} 
+              element={user ? <EditListing user={user} /> : <Navigate to="/login" />} 
             />
             <Route 
               path="/profile" 
