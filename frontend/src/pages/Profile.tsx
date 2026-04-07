@@ -197,6 +197,37 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
     }
   };
 
+  const handleDeleteListing = async (listingId: string) => {
+    const confirmed = window.confirm('Delete this listing permanently? This will remove it from your profile and Firestore.');
+    if (!confirmed) return;
+
+    setActionLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const res = await fetch(`/api/listings/${listingId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to delete listing');
+      }
+
+      setListings((currentListings) => currentListings.filter((listing) => listing.id !== listingId));
+      setSuccess('Listing deleted successfully');
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete listing');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleExportData = async () => {
     setActionLoading(true);
     try {
@@ -869,12 +900,22 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{listing.condition}</span>
                           <div className="flex gap-2">
                             {isOwnProfile && (
-                              <button 
+                              <button
                                 onClick={() => navigate(`/edit-listing/${listing.id}`)}
                                 className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-slate-900 hover:text-white transition-colors"
                                 title="Edit Listing"
                               >
                                 <Edit2 size={14} />
+                              </button>
+                            )}
+                            {isOwnProfile && (
+                              <button
+                                onClick={() => handleDeleteListing(listing.id)}
+                                disabled={actionLoading}
+                                className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-red-600 hover:text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                                title="Delete Listing"
+                              >
+                                <Trash2 size={14} />
                               </button>
                             )}
                             <button 
