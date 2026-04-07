@@ -197,32 +197,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
     }
   };
 
-  const handleDeleteListing = async (listingId: string) => {
-    if (!window.confirm('Are you sure you want to delete this listing permanently?')) return;
-    
-    setActionLoading(true);
-    try {
-      const res = await fetch(`/api/listings/${listingId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      if (res.ok) {
-        setListings(prev => prev.filter(l => l.id !== listingId));
-        setSuccess('Listing deleted successfully');
-      } else {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to delete listing');
-      }
-    } catch (err: any) {
-      console.error('[DELETE ERROR] Failed to remove listing:', err);
-      setError(`Failed to delete listing: ${err.message || 'Server error'}`);
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
   const handleExportData = async () => {
     setActionLoading(true);
     try {
@@ -470,11 +444,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
               {error ? <X size={16} /> : <CheckCircle size={16} />}
             </div>
             <p className="font-semibold">{error || success}</p>
-            <button 
-              onClick={() => { setError(''); setSuccess(''); }} 
-              className="ml-4 opacity-50 hover:opacity-100 transition-opacity"
-              title="Dismiss notification"
-            >
+            <button onClick={() => { setError(''); setSuccess(''); }} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">
               <X size={18} />
             </button>
           </motion.div>
@@ -524,8 +494,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                 className="hidden" 
                 accept="image/*" 
                 onChange={(e) => handleFileChange(e, 'cover')} 
-                title="Upload cover photo"
-                placeholder="Select image"
               />
             </div>
 
@@ -543,7 +511,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                     <button 
                       onClick={() => avatarInputRef.current?.click()}
                       className="absolute inset-1.5 rounded-[2rem] bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
-                      title="Update profile picture"
                     >
                       <Camera size={24} />
                     </button>
@@ -554,8 +521,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                     className="hidden" 
                     accept="image/*" 
                     onChange={(e) => handleFileChange(e, 'avatar')} 
-                    title="Upload profile photo"
-                    placeholder="Select image"
                   />
                 </div>
                 <div className="absolute bottom-0 right-0 lg:right-auto lg:left-24 flex gap-2">
@@ -565,7 +530,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                       whileTap={{ scale: 0.9 }}
                       onClick={() => setIsEditing(true)}
                       className="rounded-2xl bg-white p-3 shadow-xl border border-slate-100 text-slate-600 hover:text-blue-600 transition-colors"
-                      title="Profile settings"
                     >
                       <Settings className="h-5 w-5" />
                     </motion.button>
@@ -575,7 +539,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                     whileTap={{ scale: 0.9 }}
                     onClick={handleShare}
                     className="rounded-2xl bg-white p-3 shadow-xl border border-slate-100 text-slate-600 hover:text-blue-600 transition-colors"
-                    title="Share profile"
                   >
                     <Share2 className="h-5 w-5" />
                   </motion.button>
@@ -612,22 +575,22 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                 {/* Social Links */}
                 <div className="flex items-center justify-center lg:justify-start gap-4 pt-2">
                   {socialLinks.twitter && (
-                    <a href={`https://twitter.com/${socialLinks.twitter}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-400 transition-colors" title="Twitter Profile">
+                    <a href={`https://twitter.com/${socialLinks.twitter}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-400 transition-colors">
                       <Twitter size={18} />
                     </a>
                   )}
                   {socialLinks.instagram && (
-                    <a href={`https://instagram.com/${socialLinks.instagram}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-pink-500 transition-colors" title="Instagram Profile">
+                    <a href={`https://instagram.com/${socialLinks.instagram}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-pink-500 transition-colors">
                       <Instagram size={18} />
                     </a>
                   )}
                   {socialLinks.whatsapp && (
-                    <a href={`https://wa.me/${socialLinks.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors" title="Contact via WhatsApp">
+                    <a href={`https://wa.me/${socialLinks.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors">
                       <MessageSquare size={18} />
                     </a>
                   )}
                   {socialLinks.website && (
-                    <a href={socialLinks.website.startsWith('http') ? socialLinks.website : `https://${socialLinks.website}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors" title="Personal Website">
+                    <a href={socialLinks.website.startsWith('http') ? socialLinks.website : `https://${socialLinks.website}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors">
                       <Globe size={18} />
                     </a>
                   )}
@@ -906,22 +869,13 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{listing.condition}</span>
                           <div className="flex gap-2">
                             {isOwnProfile && (
-                              <>
-                                <button 
-                                  onClick={() => navigate(`/edit-listing/${listing.id}`)}
-                                  className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-slate-900 hover:text-white transition-colors"
-                                  title="Edit Listing"
-                                >
-                                  <Edit2 size={14} />
-                                </button>
-                                <button 
-                                  onClick={() => handleDeleteListing(listing.id)}
-                                  className="rounded-full bg-red-50 p-2 text-red-500 hover:bg-red-600 hover:text-white transition-colors"
-                                  title="Delete Listing"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </>
+                              <button 
+                                onClick={() => navigate(`/edit-listing/${listing.id}`)}
+                                className="rounded-full bg-slate-50 p-2 text-slate-400 hover:bg-slate-900 hover:text-white transition-colors"
+                                title="Edit Listing"
+                              >
+                                <Edit2 size={14} />
+                              </button>
                             )}
                             <button 
                               onClick={() => navigate(`/listing/${listing.id}`)}
@@ -1005,11 +959,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
             >
               <div className="mb-8 flex items-center justify-between">
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">Edit Profile</h2>
-                <button 
-                  onClick={() => setIsEditing(false)} 
-                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                  title="Close edit profile"
-                >
+                <button onClick={() => setIsEditing(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -1023,8 +973,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         value={editForm.name} 
                         onChange={(e) => setEditForm({...editForm, name: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
-                        title="Display Name"
-                        placeholder="Enter your name"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1037,7 +985,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                           onChange={(e) => setEditForm({...editForm, username: e.target.value.toLowerCase().replace(/\s/g, '')})}
                           className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 pl-10 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                           placeholder="username"
-                          title="Username"
                         />
                       </div>
                     </div>
@@ -1048,8 +995,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, bio: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         rows={3}
-                        title="About me"
-                        placeholder="Share a bit about yourself..."
                       />
                     </div>
                   </div>
@@ -1063,7 +1008,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, avatar_url: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         placeholder="https://..."
-                        title="Avatar image path"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1074,7 +1018,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, cover_url: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         placeholder="https://..."
-                        title="Cover image path"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1084,8 +1027,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         value={editForm.location} 
                         onChange={(e) => setEditForm({...editForm, location: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
-                        title="Current location"
-                        placeholder="e.g. Kenya, Nigeria"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1095,8 +1036,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         value={editForm.dob} 
                         onChange={(e) => setEditForm({...editForm, dob: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
-                        title="Date of Birth"
-                        placeholder="Birth date"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1107,7 +1046,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, phone: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         placeholder="+254..."
-                        title="Contact Phone"
                       />
                     </div>
                   </div>
@@ -1124,7 +1062,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, social_links: {...editForm.social_links, twitter: e.target.value}})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 pl-10 text-sm font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         placeholder="Twitter"
-                        title="Twitter username"
                       />
                     </div>
                     <div className="relative">
@@ -1135,7 +1072,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, social_links: {...editForm.social_links, instagram: e.target.value}})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 pl-10 text-sm font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         placeholder="Instagram"
-                        title="Instagram profile"
                       />
                     </div>
                     <div className="relative">
@@ -1146,7 +1082,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, social_links: {...editForm.social_links, whatsapp: e.target.value}})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 pl-10 text-sm font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         placeholder="WhatsApp"
-                        title="WhatsApp contact"
                       />
                     </div>
                     <div className="relative">
@@ -1157,7 +1092,6 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                         onChange={(e) => setEditForm({...editForm, social_links: {...editForm.social_links, website: e.target.value}})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 pl-10 text-sm font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
                         placeholder="Website"
-                        title="Personal website"
                       />
                     </div>
                   </div>
@@ -1199,11 +1133,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Verification</h2>
                 </div>
-                <button 
-                  onClick={() => setIsVerifying(false)} 
-                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                  title="Close verification"
-                >
+                <button onClick={() => setIsVerifying(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -1271,11 +1201,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Delete Account</h2>
                 </div>
-                <button 
-                  onClick={() => setIsDeleting(false)} 
-                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                  title="Close delete account"
-                >
+                <button onClick={() => setIsDeleting(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -1343,11 +1269,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Password</h2>
                 </div>
-                <button 
-                  onClick={() => setIsChangingPassword(false)} 
-                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                  title="Close change password"
-                >
+                <button onClick={() => setIsChangingPassword(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>
@@ -1434,11 +1356,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Email</h2>
                 </div>
-                <button 
-                  onClick={() => setIsChangingEmail(false)} 
-                  className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                  title="Close change email"
-                >
+                <button onClick={() => setIsChangingEmail(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
                   <X size={20} />
                 </button>
               </div>

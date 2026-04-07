@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Camera, MapPin, DollarSign, Loader2, ArrowLeft, X, AlertCircle, Trash2 } from 'lucide-react';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { storage, auth } from '../firebase';
 import LocationSelector from '../components/LocationSelector';
-import { uploadListingImages } from '../lib/uploadListingImages';
 
 export default function CreateListing({ user }: { user: any }) {
   const navigate = useNavigate();
@@ -81,24 +82,55 @@ export default function CreateListing({ user }: { user: any }) {
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const selectedFiles = Array.from(files);
+
+    if (!auth.currentUser) {
+      setError('You must be logged in to upload images.');
+      return;
+    }
 
     setUploading(true);
     setUploadProgress(0);
     setError(null);
 
-    console.log('[UPLOAD] Starting upload for', selectedFiles.length, 'files');
+    console.log('[UPLOAD] Starting upload for', files.length, 'files');
 
     try {
-      for (const file of selectedFiles) {
+      const urls: string[] = [];
+      
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        
+        // Check file size (5MB limit)
         if (file.size > 5 * 1024 * 1024) {
           throw new Error(`File ${file.name} is too large. Max size is 5MB.`);
         }
-      }
 
-      const urls = await uploadListingImages(selectedFiles, (progress) => {
-        setUploadProgress(progress);
-      });
+        console.log('[UPLOAD] Uploading file:', file.name, 'size:', file.size);
+        const storageRef = ref(storage, `listings/${auth.currentUser?.uid}/${Date.now()}_${file.name}`);
+        
+        const uploadTask = uploadBytesResumable(storageRef, file);
+
+        const url = await new Promise<string>((resolve, reject) => {
+          uploadTask.on('state_changed', 
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              setUploadProgress(progress);
+              console.log(`[UPLOAD] Progress for ${file.name}: ${progress}%`);
+            }, 
+            (error) => {
+              console.error('[UPLOAD ERROR] Task failed:', error);
+              reject(error);
+            }, 
+            async () => {
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(downloadURL);
+            }
+          );
+        });
+
+        urls.push(url);
+        console.log('[UPLOAD] File uploaded successfully:', file.name, 'URL:', url);
+      }
 
       setFormData(prev => ({
         ...prev,
@@ -223,8 +255,6 @@ export default function CreateListing({ user }: { user: any }) {
             className="hidden"
             ref={fileInputRef}
             onChange={handleImageUpload}
-            title="Upload product images"
-            placeholder="Browse files"
           />
           
           <div 
@@ -254,7 +284,6 @@ export default function CreateListing({ user }: { user: any }) {
                     type="button"
                     onClick={() => removeImage(index)}
                     className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-white opacity-0 transition-opacity group-hover:opacity-100"
-                    title="Remove this image"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -284,7 +313,6 @@ export default function CreateListing({ user }: { user: any }) {
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-6 outline-none focus:border-blue-500 focus:bg-white"
                 value={formData.category}
                 onChange={e => setFormData({...formData, category: e.target.value})}
-                title="Select product category"
               >
                 <option>Fashion</option>
                 <option>Electronics</option>
@@ -299,7 +327,6 @@ export default function CreateListing({ user }: { user: any }) {
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-6 outline-none focus:border-blue-500 focus:bg-white"
                 value={formData.condition}
                 onChange={e => setFormData({...formData, condition: e.target.value})}
-                title="Select product condition"
               >
                 <option>New</option>
                 <option>Like New</option>

@@ -13,7 +13,6 @@ import Home from './pages/Home';
 import Marketplace from './pages/Marketplace';
 import ListingDetail from './pages/ListingDetail';
 import CreateListing from './pages/CreateListing';
-import EditListing from './pages/EditListing';
 import Profile from './pages/Profile';
 import Wallet from './pages/Wallet';
 import Chat from './pages/Chat';
@@ -29,20 +28,6 @@ import Offers from './pages/Offers';
 import SearchResults from './pages/SearchResults';
 import PaymentSuccess from './pages/PaymentSuccess';
 import NotFound from './pages/NotFound';
-
-function readStoredCart(): any[] {
-  try {
-    const savedCart = localStorage.getItem('cart');
-    if (!savedCart) return [];
-
-    const parsed = JSON.parse(savedCart);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    console.error('[APP] Failed to parse cart from localStorage:', error);
-    localStorage.removeItem('cart');
-    return [];
-  }
-}
 
 function NavigationLogger() {
   const location = useLocation();
@@ -105,7 +90,10 @@ export default function App() {
       }
     });
 
-    setCart(readStoredCart());
+    const savedCart = localStorage.getItem('cart');
+    if (savedCart) {
+      setCart(JSON.parse(savedCart));
+    }
 
     return () => unsubscribe();
   }, []);
@@ -165,7 +153,7 @@ export default function App() {
             />
             <Route 
               path="/edit-listing/:id" 
-              element={user ? <EditListing user={user} /> : <Navigate to="/login" />} 
+              element={user ? <CreateListing user={user} /> : <Navigate to="/login" />} 
             />
             <Route 
               path="/profile" 
@@ -191,14 +179,8 @@ export default function App() {
               path="/offers" 
               element={user ? <Offers user={user} /> : <Navigate to="/login" />} 
             />
-            <Route 
-              path="/login" 
-              element={user ? <Navigate to="/profile" /> : <Login setUser={setUser} />} 
-            />
-            <Route 
-              path="/register" 
-              element={user ? <Navigate to="/profile" /> : <Register setUser={setUser} />} 
-            />
+            <Route path="/login" element={<Login setUser={setUser} />} />
+            <Route path="/register" element={<Register setUser={setUser} />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
