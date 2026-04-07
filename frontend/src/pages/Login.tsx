@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { User as UserIcon, Lock, Loader2, ShieldCheck, Eye, EyeOff, Github, AlertCircle, CheckCircle2 } from 'lucide-react';
 import ReCAPTCHA from 'react-google-recaptcha';
-import { signInWithEmailAndPassword, sendEmailVerification, signOut } from 'firebase/auth';
+import { signInWithEmailAndPassword, signInWithCustomToken, sendEmailVerification, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
@@ -22,50 +22,6 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
   const navigate = useNavigate();
 
   const siteKey = (import.meta as any).env.VITE_RECAPTCHA_SITE_KEY;
-
-  const completeLogin = async (firebaseUser: any) => {
-    await firebaseUser.reload();
-
-    if (!firebaseUser.emailVerified) {
-      setUnverified(true);
-      setError('Your email is not verified. Please check your inbox or click below to resend.');
-      return;
-    }
-
-    const token = await firebaseUser.getIdToken();
-    localStorage.setItem('token', token);
-    
-    const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-    
-    if (!userDoc.exists()) {
-      console.warn('[LOGIN] Firestore profile not found for UID:', firebaseUser.uid);
-      const basicData = {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email,
-        displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0],
-        avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-        emailVerified: firebaseUser.emailVerified,
-        username: firebaseUser.displayName?.toLowerCase().replace(/\s/g, '') || firebaseUser.email?.split('@')[0],
-        wallet_balance: 0,
-        role: 'buyer'
-      };
-      localStorage.setItem('user', JSON.stringify(basicData));
-      setUser(basicData);
-    } else {
-      const dbUser = userDoc.data();
-      const userData = {
-        ...dbUser,
-        id: firebaseUser.uid,
-        uid: firebaseUser.uid,
-        email: firebaseUser.email,
-        emailVerified: firebaseUser.emailVerified,
-      };
-      localStorage.setItem('user', JSON.stringify(userData));
-      setUser(userData);
-    }
-    
-    navigate('/');
-  };
 
   const handleResendVerification = async () => {
     const firebaseUser = auth.currentUser;
@@ -107,39 +63,67 @@ export default function Login({ setUser }: { setUser: (user: any) => void }) {
     console.log("Attempting login with:", { email: email.trim(), password: password ? '********' : 'EMPTY' });
 
     try {
+      // 1. Sign in with Firebase Auth
       const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
-      await completeLogin(userCredential.user);
+      const firebaseUser = userCredential.user;
+
+      // Force reload to get the latest emailVerified status
+      await firebaseUser.reload();
+
+      // Check if email is verified as requested by user
+      if (!firebaseUser.emailVerified) {
+        setUnverified(true);
+        setError('Your email is not verified. Please check your inbox or click below to resend.');
+        setLoading(false);
+        return;
+      }
+
+      const token = await firebaseUser.getIdToken();
+      localStorage.setItem('token', token);
+      
+      // 2. Fetch user profile from Firestore
+      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+      
+      if (!userDoc.exists()) {
+        console.warn('[LOGIN] Firestore profile not found for UID:', firebaseUser.uid);
+        // If profile doesn't exist, we might want to redirect to a "Complete Profile" page
+        // For now, we'll create a basic one so the app doesn't crash
+        const basicData = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0],
+          avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+          emailVerified: firebaseUser.emailVerified,
+          username: firebaseUser.displayName?.toLowerCase().replace(/\s/g, '') || firebaseUser.email?.split('@')[0],
+          wallet_balance: 0,
+          role: 'buyer'
+        };
+        localStorage.setItem('user', JSON.stringify(basicData));
+        setUser(basicData);
+      } else {
+        const dbUser = userDoc.data();
+        const userData = {
+          ...dbUser,
+          id: firebaseUser.uid,
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          emailVerified: firebaseUser.emailVerified,
+        };
+        localStorage.setItem('user', JSON.stringify(userData));
+        setUser(userData);
+      }
+      
+      navigate('/');
     } catch (err: any) {
       console.error('Login error:', err);
-      if (
+      if (err.code === 'auth/operation-not-allowed') {
+        setError('Login method is not enabled. Please contact support or check Firebase Console.');
+      } else if (
         err.code === 'auth/user-not-found' || 
         err.code === 'auth/wrong-password' || 
         err.code === 'auth/invalid-credential'
       ) {
-        try {
-          const res = await fetch('/api/auth/demo-login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: email.trim(),
-              password,
-              captchaToken,
-            }),
-          });
-
-          if (res.ok) {
-            await res.json();
-            const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
-            await completeLogin(userCredential.user);
-            return;
-          }
-        } catch (fallbackError) {
-          console.error('Demo login fallback failed:', fallbackError);
-        }
-
         setError('Email or password is incorrect');
-      } else if (err.code === 'auth/operation-not-allowed') {
-        setError('Login method is not enabled. Please contact support or check Firebase Console.');
       } else if (err.code === 'auth/invalid-email') {
         setError('Invalid email format');
       } else if (err.code === 'auth/too-many-requests') {

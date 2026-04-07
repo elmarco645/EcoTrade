@@ -15,17 +15,10 @@ const config = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || firebaseConfig.measurementId,
 };
 
-const firestoreDatabaseId =
-  import.meta.env.VITE_FIREBASE_DATABASE_ID ||
-  firebaseConfig.firestoreDatabaseId ||
-  '(default)';
-
 // Initialize Firebase
 const app = initializeApp(config);
 const auth = getAuth(app);
-const db = firestoreDatabaseId === '(default)'
-  ? getFirestore(app)
-  : getFirestore(app, firestoreDatabaseId);
+const db = getFirestore(app, import.meta.env.VITE_FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId);
 const storage = getStorage(app);
 
 export { app, auth, db, storage };

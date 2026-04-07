@@ -6,6 +6,3 @@ coverage/
 *.log
 .env*
 !.env.example
-temp_mcp/
-uploads/
-*-firebase-adminsdk-*.json
