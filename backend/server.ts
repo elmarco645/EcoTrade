@@ -1,16 +1,36 @@
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
-import { createServer } from 'http';
+import { createServer } from 'node:http';
 import { Server } from 'socket.io';
+
+// Handle unhandled promise rejections and uncaught exceptions
+process.on('unhandledRejection', (reason, promise) => {
+  if (reason && typeof reason === 'object' && (reason as any).message?.includes('Could not load the default credentials')) {
+    console.error('[SERVER] Firebase credentials error (unhandled rejection):', (reason as any).message);
+    console.warn('[SERVER] Firebase will not be available. Continuing without it.');
+  } else {
+    console.error('[SERVER] Unhandled Promise Rejection:', reason);
+  }
+});
+
+process.on('uncaughtException', (error) => {
+  if (error.message?.includes('Could not load the default credentials')) {
+    console.error('[SERVER] Firebase credentials error (uncaught exception):', error.message);
+    console.warn('[SERVER] Firebase will not be available. Continuing without it.');
+  } else {
+    console.error('[SERVER] Uncaught Exception:', error);
+    process.exit(1);
+  }
+});
 import { createServer as createViteServer } from 'vite';
 import bcrypt from 'bcryptjs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import axios from 'axios';
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import multer from 'multer';
-import fs from 'fs';
+import fs from 'node:fs';
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import admin from 'firebase-admin';
@@ -40,48 +60,74 @@ try {
     // If not specified, try to extract it from the client email
     const extractedProjectId = clientEmail.split('@')[1]?.split('.')[0];
     
-    projectId = process.env.FIREBASE_PROJECT_ID || 
-                process.env.VITE_FIREBASE_PROJECT_ID || 
-                extractedProjectId ||
-                firebaseConfig.projectId;
-    
-    source = process.env.FIREBASE_PROJECT_ID ? 'FIREBASE_PROJECT_ID (Service Account)' :
-             process.env.VITE_FIREBASE_PROJECT_ID ? 'VITE_FIREBASE_PROJECT_ID (Service Account)' :
-             extractedProjectId ? 'extracted from clientEmail (Service Account)' :
-             'config (Service Account)';
-  } else {
-    // If no service account, we should ideally let admin.initializeApp() pick up the environment project.
-    // But we still want to know what we're aiming for.
-    projectId = process.env.GOOGLE_CLOUD_PROJECT || 
-                process.env.FIREBASE_PROJECT_ID ||
-                process.env.VITE_FIREBASE_PROJECT_ID ||
-                firebaseConfig.projectId;
-    source = process.env.GOOGLE_CLOUD_PROJECT ? 'GOOGLE_CLOUD_PROJECT (ADC)' : 
-             process.env.FIREBASE_PROJECT_ID ? 'FIREBASE_PROJECT_ID (ADC)' :
-             process.env.VITE_FIREBASE_PROJECT_ID ? 'VITE_FIREBASE_PROJECT_ID (ADC)' :
-             'config (ADC)';
-  }
+      const hasFirebaseProjectId = !!process.env.FIREBASE_PROJECT_ID;
+      const hasViteProjectId = !!process.env.VITE_FIREBASE_PROJECT_ID;
+      
+      projectId = process.env.FIREBASE_PROJECT_ID || 
+                  process.env.VITE_FIREBASE_PROJECT_ID || 
+                  extractedProjectId ||
+                  firebaseConfig.projectId;
+      
+      if (hasFirebaseProjectId) {
+        source = 'FIREBASE_PROJECT_ID (Service Account)';
+      } else if (hasViteProjectId) {
+        source = 'VITE_FIREBASE_PROJECT_ID (Service Account)';
+      } else if (extractedProjectId) {
+        source = 'extracted from clientEmail (Service Account)';
+      } else {
+        source = 'config (Service Account)';
+      }
+    } else {
+      // If no service account, we should ideally let admin.initializeApp() pick up the environment project.
+      // But we still want to know what we're aiming for.
+      projectId = process.env.GOOGLE_CLOUD_PROJECT || 
+                  process.env.FIREBASE_PROJECT_ID ||
+                  process.env.VITE_FIREBASE_PROJECT_ID ||
+                  firebaseConfig.projectId;
+      
+      if (process.env.GOOGLE_CLOUD_PROJECT) {
+        source = 'GOOGLE_CLOUD_PROJECT (ADC)';
+      } else if (process.env.FIREBASE_PROJECT_ID) {
+        source = 'FIREBASE_PROJECT_ID (ADC)';
+      } else if (process.env.VITE_FIREBASE_PROJECT_ID) {
+        source = 'VITE_FIREBASE_PROJECT_ID (ADC)';
+      } else {
+        source = 'config (ADC)';
+      }
+    }
   
   console.log(`[SERVER] Target Firebase Project ID: ${projectId} (Source: ${source})`);
   
   // Use environment variable for database ID if available, otherwise fallback to config or (default)
   // If we have a service account, we should probably default to '(default)' unless explicitly overridden
+  const hasFirebaseDbId = !!process.env.FIREBASE_DATABASE_ID;
+  const hasViteDbId = !!process.env.VITE_FIREBASE_DATABASE_ID;
+  const defaultDb = clientEmail ? '(default)' : firebaseConfig.firestoreDatabaseId;
+  
   databaseId = process.env.FIREBASE_DATABASE_ID || 
                     process.env.VITE_FIREBASE_DATABASE_ID ||
-                    (clientEmail ? '(default)' : firebaseConfig.firestoreDatabaseId) || 
+                    defaultDb || 
                     '(default)';
 
-  const dbSource = process.env.FIREBASE_DATABASE_ID ? 'FIREBASE_DATABASE_ID' :
-                   process.env.VITE_FIREBASE_DATABASE_ID ? 'VITE_FIREBASE_DATABASE_ID' :
-                   (clientEmail && !process.env.FIREBASE_DATABASE_ID) ? 'service account default' :
-                   firebaseConfig.firestoreDatabaseId ? 'config' : 'default';
+  let dbSource: string;
+  if (hasFirebaseDbId) {
+    dbSource = 'FIREBASE_DATABASE_ID';
+  } else if (hasViteDbId) {
+    dbSource = 'VITE_FIREBASE_DATABASE_ID';
+  } else if (clientEmail && !hasFirebaseDbId) {
+    dbSource = 'service account default';
+  } else if (firebaseConfig.firestoreDatabaseId) {
+    dbSource = 'config';
+  } else {
+    dbSource = 'default';
+  }
 
   console.log(`[SERVER] Firebase Database ID: ${databaseId} (Source: ${dbSource})`);
   
   if (!admin.apps.length) {
     if (clientEmail && privateKey) {
       console.log('[SERVER] Firebase Admin: Initializing with service account...');
-      const formattedKey = privateKey.replace(/\\n/g, '\n').replace(/^["']|["']$/g, '');
+      const formattedKey = privateKey.replaceAll('\\n', '\n').replaceAll(/^["']|["']$/g, '');
       admin.initializeApp({
         credential: admin.credential.cert({
           projectId,
@@ -92,14 +138,26 @@ try {
       });
     } else {
       console.log('[SERVER] Firebase Admin: Initializing with Application Default Credentials (ADC)...');
-      // In AI Studio, initializing without arguments is the most reliable way to use the container's identity.
-      // It automatically picks up the project ID and credentials from the environment.
-      admin.initializeApp();
-      
-      // If GOOGLE_CLOUD_PROJECT is set, we should use it as the projectId for logging
-      if (process.env.GOOGLE_CLOUD_PROJECT) {
-        projectId = process.env.GOOGLE_CLOUD_PROJECT;
-        console.log(`[SERVER] Using GOOGLE_CLOUD_PROJECT: ${projectId}`);
+      try {
+        // Initialize with projectId to help Firebase Admin SDK locate the correct project
+        admin.initializeApp({
+          projectId: projectId
+        });
+        
+        if (process.env.GOOGLE_CLOUD_PROJECT) {
+          console.log(`[SERVER] Using GOOGLE_CLOUD_PROJECT: ${projectId}`);
+        }
+      } catch (initError: any) {
+        // If ADC initialization fails, try initializing without credentials for development mode
+        console.warn('[SERVER] ADC initialization failed:', initError.message);
+        console.warn('[SERVER] Attempting development mode initialization...');
+        try {
+          // Initialize without credentials - this will work with Firestore emulator or skip credential checks
+          admin.initializeApp();
+        } catch (devInitError: any) {
+          console.error('[SERVER] Development mode initialization also failed:', devInitError.message);
+          console.error('[SERVER] Firebase Admin SDK will not be functional.');
+        }
       }
     }
   }
@@ -112,16 +170,40 @@ try {
     console.warn('[SERVER] WARNING: No explicit credential provided. Admin SDK will rely on Application Default Credentials (ADC).');
   }
 
-  firestore = getFirestore(currentApp, databaseId);
-  console.log(`[SERVER] Firestore initialized for database: ${databaseId} in project: ${currentApp.options.projectId}`);
+  try {
+    firestore = getFirestore(currentApp, databaseId);
+    console.log(`[SERVER] Firestore initialized for database: ${databaseId} in project: ${currentApp.options.projectId}`);
+  } catch (firestoreError: any) {
+    console.error('[SERVER] Failed to initialize Firestore:', firestoreError.message);
+    console.warn('[SERVER] Continuing without Firestore. Some features may not work.');
+  }
 
   // Test Firestore connection on startup
   const testFirestore = async () => {
+    if (!firestore) {
+      console.warn('[SERVER] Firestore not initialized. Skipping connection test.');
+      return;
+    }
+    
     try {
       console.log(`[SERVER] Testing Firestore connection (Database: ${databaseId})...`);
-      // Try a simple operation to verify connection
-      await firestore.listCollections();
-      console.log(`[SERVER] Firestore connection test successful.`);
+      
+      // Wrap the connection test with a timeout
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore connection test timed out after 5 seconds')), 5000)
+      );
+      
+      try {
+        await Promise.race([firestore.listCollections(), timeoutPromise]);
+        console.log(`[SERVER] Firestore connection test successful.`);
+      } catch (timeoutError: any) {
+        if (timeoutError.message?.includes('timed out')) {
+          console.warn('[SERVER] Firestore connection test timed out. This may indicate missing credentials or network connectivity.');
+          console.warn('[SERVER] Proceeding anyway. Firestore operations may fail at runtime.');
+        } else {
+          throw timeoutError;
+        }
+      }
     } catch (error: any) {
       console.error('[SERVER] Firestore connection test failed:');
       const isUnauthenticated = error.code === 16 || error.message?.includes('UNAUTHENTICATED');
@@ -143,7 +225,10 @@ try {
           try {
             const defaultFirestore = getFirestore(currentApp, '(default)');
             // Use a simpler check that doesn't rely on a specific collection
-            await defaultFirestore.listCollections();
+            const defaultTimeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Fallback connection test timed out')), 5000)
+            );
+            await Promise.race([defaultFirestore.listCollections(), defaultTimeoutPromise]);
             console.log('[SERVER] Fallback to (default) database successful. Updating global firestore instance.');
             firestore = defaultFirestore;
             databaseId = '(default)';
@@ -151,14 +236,19 @@ try {
             console.error('[SERVER] Fallback to (default) database also failed:', fallbackError.message);
           }
         }
-      } else {
+      } else if (!error.message?.includes('timed out')) {
         console.error('[SERVER] Error details:', error.message);
       }
     }
   };
   
   // Wait for Firestore test to complete before moving on
-  await testFirestore();
+  try {
+    await testFirestore();
+  } catch (testError: any) {
+    console.error('[SERVER] Firestore test threw an error:', testError.message);
+    console.warn('[SERVER] Continuing without Firestore connectivity.');
+  }
   
   // Trigger debug info on startup
   setTimeout(async () => {
@@ -171,6 +261,10 @@ try {
   }, 5000);
 } catch (error: any) {
   console.error('[SERVER] Failed to initialize Firebase Admin:', error.message);
+  // Ensure firestore has a safe value even if initialization fails
+  if (!firestore) {
+    console.warn('[SERVER] Firestore is not initialized. Features requiring Firestore will not work.');
+  }
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -497,7 +591,7 @@ async function startServer() {
         phone: phone || null,
         avatar: avatar || null,
         role: 'buyer',
-        wallet_balance: 1000.0,
+        wallet_balance: 1000,
         rating: 0,
         is_verified: false,
         is_email_verified: true,
@@ -518,7 +612,7 @@ async function startServer() {
     }
   });
 
-  function detectInputType(input: string) {
+function detectInputType(input: string) {
     if (input.includes("@")) return "email";
     if (/^\+?\d{10,15}$/.test(input)) return "phone";
     return "username";
@@ -654,7 +748,7 @@ async function startServer() {
         const userRes = await axios.get('https://api.github.com/user', {
           headers: { Authorization: `Bearer ${access_token}` }
         });
-        const githubUser = userRes.data; // { id, email, name, login, avatar_url }
+        const githubUser = userRes.data;
         name = githubUser.name || githubUser.login;
         avatarUrl = githubUser.avatar_url;
         
@@ -682,7 +776,7 @@ async function startServer() {
           const username = githubUser.login + Math.floor(Math.random() * 1000);
           const newUser = {
             email: email.toLowerCase(),
-            password: 'OAUTH_USER',
+            password: process.env.OAUTH_USER_PASSWORD || 'OAUTH_USER',
             name: githubUser.name || githubUser.login,
             username: username.toLowerCase(),
             github_id: githubUser.id.toString(),
@@ -900,7 +994,7 @@ async function startServer() {
   app.post('/api/user/request-email-change', authenticateToken, async (req: any, res) => {
     const { newEmail } = req.body;
     try {
-      if (!newEmail || !newEmail.includes('@')) {
+      if (!newEmail?.includes('@')) {
         return res.status(400).json({ error: 'Invalid email address' });
       }
 
@@ -1253,7 +1347,7 @@ async function startServer() {
         description,
         category,
         condition,
-        price: parseFloat(price),
+        price: Number.parseFloat(price),
         is_negotiable: !!is_negotiable,
         location,
         images: images || [],
@@ -1293,7 +1387,7 @@ async function startServer() {
       if (description !== undefined) updateData.description = description;
       if (category !== undefined) updateData.category = category;
       if (condition !== undefined) updateData.condition = condition;
-      if (price !== undefined) updateData.price = parseFloat(price);
+      if (price !== undefined) updateData.price = Number.parseFloat(price);
       if (is_negotiable !== undefined) updateData.is_negotiable = !!is_negotiable;
       if (location !== undefined) updateData.location = location;
       if (images !== undefined) updateData.images = images;
@@ -1345,7 +1439,7 @@ async function startServer() {
         listing_id,
         buyer_id: req.user.id,
         seller_id: listing?.seller_id,
-        amount: parseFloat(amount),
+        amount: Number.parseFloat(amount),
         status: 'pending',
         expires_at: admin.firestore.Timestamp.fromDate(expires_at),
         created_at: admin.firestore.FieldValue.serverTimestamp()
@@ -1381,7 +1475,8 @@ async function startServer() {
         };
       }));
 
-      res.json(offers.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
+      const sortedOffers = offers.sort((a, b) => b.created_at.toDate().getTime() - a.created_at.toDate().getTime());
+      res.json(sortedOffers);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1448,7 +1543,8 @@ async function startServer() {
         };
       }));
 
-      res.json(transactions.sort((a, b) => b.created_at.toDate() - a.created_at.toDate()));
+      const sortedTransactions = transactions.sort((a, b) => b.created_at.toDate().getTime() - a.created_at.toDate().getTime());
+      res.json(sortedTransactions);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -2015,7 +2111,7 @@ async function startServer() {
   });
 
   // --- Vite Middleware ---
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV === 'development') {
     try {
       console.log('[SERVER] Initializing Vite dev server...');
       const vite = await createViteServer({
@@ -2088,7 +2184,7 @@ async function startServer() {
 
         await user1Ref.set({ email: 'alice@example.com', password: hashedPassword, name: 'Alice Green', username: 'alice', wallet_balance: 500, rating: 4.9, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
         await user2Ref.set({ email: 'bob@example.com', password: hashedPassword, name: 'Bob Smith', username: 'bob', wallet_balance: 1000, rating: 4.5, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
-        await user3Ref.set({ email: 'nefaryus@example.com', password: hashedPassword, name: 'Nefaryus', username: 'Nefaryus', wallet_balance: 1500, rating: 5.0, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
+        await user3Ref.set({ email: 'nefaryus@example.com', password: hashedPassword, name: 'Nefaryus', username: 'Nefaryus', wallet_balance: 1500, rating: 5, is_email_verified: true, created_at: admin.firestore.FieldValue.serverTimestamp() });
         
         // Create listings
         const listings = [
