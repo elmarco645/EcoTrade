@@ -39,7 +39,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import firebaseConfig from '../firebase-applet-config.json' assert { type: 'json' };
 
 let databaseId: string;
-let firestore: admin.firestore.Firestore;
+let firestore: admin.firestore.Firestore = undefined as any;
 
 console.log('[SERVER] Initializing Firebase Admin...');
 try {
@@ -335,6 +335,33 @@ const sendDeleteUndoEmail = async (email: string, token: string, origin: string)
     console.log(`Delete undo email sent to ${email}`);
   } catch (error) {
     console.error('Error sending delete undo email:', error);
+  }
+};
+
+const sendEmailChangeVerificationEmail = async (email: string, token: string, origin: string) => {
+  if (!EMAIL_USER || !EMAIL_PASS) {
+    console.warn('Email credentials missing. Email change verification email simulation only.');
+    console.log(`[EMAIL SIMULATION] Verification link for ${email}: ${origin}/confirm-email-change?token=${token}`);
+    return;
+  }
+
+  const link = `${origin}/confirm-email-change?token=${token}`;
+
+  try {
+    await transporter.sendMail({
+      from: `"EcoTrade" <${EMAIL_USER}>`,
+      to: email,
+      subject: 'Verify Your New Email',
+      html: emailTemplate(
+        "Verify Your New Email",
+        "We received a request to change your email address. Please click the button below to verify your new email and complete the change.",
+        "Verify Email",
+        link
+      )
+    });
+    console.log(`Email change verification email sent to ${email}`);
+  } catch (error) {
+    console.error('Error sending email change verification email:', error);
   }
 };
 
@@ -1305,7 +1332,7 @@ function detectInputType(input: string) {
       for (const id of ids) {
         const listingDoc = await firestore.collection('listings').doc(id).get();
         if (listingDoc.exists) {
-          const listing = { ...listingDoc.data(), id: listingDoc.id };
+          const listing = { ...listingDoc.data(), id: listingDoc.id } as any;
           if (listing.status === 'reserved') {
             // Check for pending transactions
             const pendingTxQuery = await firestore.collection('transactions')
@@ -1326,7 +1353,7 @@ function detectInputType(input: string) {
 
             if (!hasActiveTx) {
               await firestore.collection('listings').doc(id).update({ status: 'available' });
-              listing.status = 'available';
+              (listing as any).status = 'available';
             }
           }
           listings.push(listing);
@@ -1475,7 +1502,7 @@ function detectInputType(input: string) {
         };
       }));
 
-      const sortedOffers = offers.sort((a, b) => b.created_at.toDate().getTime() - a.created_at.toDate().getTime());
+      const sortedOffers = offers.sort((a: any, b: any) => b.created_at.toDate().getTime() - a.created_at.toDate().getTime());
       res.json(sortedOffers);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1543,7 +1570,7 @@ function detectInputType(input: string) {
         };
       }));
 
-      const sortedTransactions = transactions.sort((a, b) => b.created_at.toDate().getTime() - a.created_at.toDate().getTime());
+      const sortedTransactions = transactions.sort((a: any, b: any) => b.created_at.toDate().getTime() - a.created_at.toDate().getTime());
       res.json(sortedTransactions);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1582,7 +1609,7 @@ function detectInputType(input: string) {
         
         if (!hasActiveTx) {
           await listingRef.update({ status: 'available' });
-          listing.status = 'available';
+          (listing as any).status = 'available';
         }
       }
 
@@ -1617,15 +1644,15 @@ function detectInputType(input: string) {
   app.post('/api/transactions/checkout', authenticateToken, async (req: any, res) => {
     const { items, total, shipping_address } = req.body;
     try {
-      const availableItems = [];
-      const unavailableItems = [];
+      const availableItems: any[] = [];
+      const unavailableItems: any[] = [];
 
       for (const listing_id of items) {
         const listingRef = firestore.collection('listings').doc(listing_id);
         const listingDoc = await listingRef.get();
         
         if (listingDoc.exists) {
-          const listing = { ...listingDoc.data(), id: listingDoc.id };
+          const listing = { ...listingDoc.data(), id: listingDoc.id } as any;
           if (listing.status === 'reserved') {
             const pendingTxQuery = await firestore.collection('transactions')
               .where('listing_id', '==', listing_id)
@@ -1645,7 +1672,7 @@ function detectInputType(input: string) {
             
             if (!hasActiveTx) {
               await listingRef.update({ status: 'available' });
-              listing.status = 'available';
+              (listing as any).status = 'available';
             }
           }
 
@@ -1668,7 +1695,7 @@ function detectInputType(input: string) {
 
       const transactionIds = await firestore.runTransaction(async (transaction) => {
         const ids = [];
-        for (const listing of availableItems) {
+        for (const listing of availableItems as any[]) {
           const newTxRef = firestore.collection('transactions').doc();
           transaction.set(newTxRef, {
             listing_id: listing.id,
@@ -1850,9 +1877,9 @@ function detectInputType(input: string) {
         
         // Join with listing and users
         const [listingDoc, sellerDoc, buyerDoc] = await Promise.all([
-          firestore.collection('listings').doc(t.listing_id).get(),
-          firestore.collection('users').doc(t.seller_id).get(),
-          firestore.collection('users').doc(t.buyer_id).get()
+          firestore.collection('listings').doc((t as any).listing_id).get(),
+          firestore.collection('users').doc((t as any).seller_id).get(),
+          firestore.collection('users').doc((t as any).buyer_id).get()
         ]);
 
         orders.push({

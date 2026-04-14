@@ -475,7 +475,11 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
               {error ? <X size={16} /> : <CheckCircle size={16} />}
             </div>
             <p className="font-semibold">{error || success}</p>
-            <button onClick={() => { setError(''); setSuccess(''); }} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">
+            <button 
+              onClick={() => { setError(''); setSuccess(''); }} 
+              className="ml-4 opacity-50 hover:opacity-100 transition-opacity"
+              aria-label="Close notification"
+            >
               <X size={18} />
             </button>
           </motion.div>
@@ -520,11 +524,13 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                 )}
               </div>
               <input 
+                id="cover-upload"
                 type="file" 
                 ref={coverInputRef} 
                 className="hidden" 
                 accept="image/*" 
                 onChange={(e) => handleFileChange(e, 'cover')} 
+                aria-label="Upload cover image"
               />
             </div>
 
@@ -542,16 +548,20 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                     <button 
                       onClick={() => avatarInputRef.current?.click()}
                       className="absolute inset-1.5 rounded-[2rem] bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
+                      aria-label="Upload profile photo"
+                      title="Upload profile photo"
                     >
                       <Camera size={24} />
                     </button>
                   )}
                   <input 
+                    id="avatar-upload"
                     type="file" 
                     ref={avatarInputRef} 
                     className="hidden" 
                     accept="image/*" 
                     onChange={(e) => handleFileChange(e, 'avatar')} 
+                    aria-label="Upload avatar photo"
                   />
                 </div>
                 <div className="absolute bottom-0 right-0 lg:right-auto lg:left-24 flex gap-2">
@@ -606,22 +616,22 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                 {/* Social Links */}
                 <div className="flex items-center justify-center lg:justify-start gap-4 pt-2">
                   {socialLinks.twitter && (
-                    <a href={`https://twitter.com/${socialLinks.twitter}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-400 transition-colors">
+                    <a href={`https://twitter.com/${socialLinks.twitter}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-400 transition-colors" aria-label="Twitter">
                       <Twitter size={18} />
                     </a>
                   )}
                   {socialLinks.instagram && (
-                    <a href={`https://instagram.com/${socialLinks.instagram}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-pink-500 transition-colors">
+                    <a href={`https://instagram.com/${socialLinks.instagram}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-pink-500 transition-colors" aria-label="Instagram">
                       <Instagram size={18} />
                     </a>
                   )}
                   {socialLinks.whatsapp && (
-                    <a href={`https://wa.me/${socialLinks.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors">
+                    <a href={`https://wa.me/${socialLinks.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors" aria-label="WhatsApp">
                       <MessageSquare size={18} />
                     </a>
                   )}
                   {socialLinks.website && (
-                    <a href={socialLinks.website.startsWith('http') ? socialLinks.website : `https://${socialLinks.website}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors">
+                    <a href={socialLinks.website.startsWith('http') ? socialLinks.website : `https://${socialLinks.website}`} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-emerald-500 transition-colors" aria-label="Website">
                       <Globe size={18} />
                     </a>
                   )}
@@ -1000,7 +1010,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
             >
               <div className="mb-8 flex items-center justify-between">
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">Edit Profile</h2>
-                <button onClick={() => setIsEditing(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                <button onClick={() => setIsEditing(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" aria-label="Close edit profile">
                   <X size={20} />
                 </button>
               </div>
@@ -1008,8 +1018,9 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-6">
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Full Name</label>
+                      <label htmlFor="edit-name" className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Full Name</label>
                       <input 
+                        id="edit-name"
                         type="text" 
                         value={editForm.name} 
                         onChange={(e) => setEditForm({...editForm, name: e.target.value})}
@@ -1017,10 +1028,11 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Username</label>
+                      <label htmlFor="edit-username" className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Username</label>
                       <div className="relative">
                         <AtSign className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                         <input 
+                          id="edit-username"
                           type="text" 
                           value={editForm.username} 
                           onChange={(e) => setEditForm({...editForm, username: e.target.value.toLowerCase().replace(/\s/g, '')})}
@@ -1030,8 +1042,9 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Bio</label>
+                      <label htmlFor="edit-bio" className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Bio</label>
                       <textarea 
+                        id="edit-bio"
                         value={editForm.bio} 
                         onChange={(e) => setEditForm({...editForm, bio: e.target.value})}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all"
@@ -1062,8 +1075,9 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Location</label>
+                      <label htmlFor="edit-location" className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Location</label>
                       <input 
+                        id="edit-location"
                         type="text" 
                         value={editForm.location} 
                         onChange={(e) => setEditForm({...editForm, location: e.target.value})}
@@ -1071,8 +1085,9 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Date of Birth</label>
+                      <label htmlFor="edit-dob" className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Date of Birth</label>
                       <input 
+                        id="edit-dob"
                         type="date" 
                         value={editForm.dob} 
                         onChange={(e) => setEditForm({...editForm, dob: e.target.value})}
@@ -1174,7 +1189,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Verification</h2>
                 </div>
-                <button onClick={() => setIsVerifying(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                <button onClick={() => setIsVerifying(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" aria-label="Close verification">
                   <X size={20} />
                 </button>
               </div>
@@ -1242,7 +1257,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Delete Account</h2>
                 </div>
-                <button onClick={() => setIsDeleting(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                <button onClick={() => setIsDeleting(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" aria-label="Close delete account">
                   <X size={20} />
                 </button>
               </div>
@@ -1310,7 +1325,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Password</h2>
                 </div>
-                <button onClick={() => setIsChangingPassword(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                <button onClick={() => setIsChangingPassword(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" aria-label="Close change password">
                   <X size={20} />
                 </button>
               </div>
@@ -1397,7 +1412,7 @@ export default function Profile({ user: loggedInUser }: { user: any }) {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">Change Email</h2>
                 </div>
-                <button onClick={() => setIsChangingEmail(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                <button onClick={() => setIsChangingEmail(false)} className="rounded-2xl bg-slate-50 p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors" aria-label="Close change email">
                   <X size={20} />
                 </button>
               </div>

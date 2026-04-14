@@ -249,12 +249,14 @@ export default function CreateListing({ user }: { user: any }) {
         {/* Image Upload */}
         <div className="space-y-4">
           <input
+            id="image-upload"
             type="file"
             multiple
             accept="image/*"
             className="hidden"
             ref={fileInputRef}
             onChange={handleImageUpload}
+            aria-label="Upload item photos"
           />
           
           <div 
@@ -284,6 +286,8 @@ export default function CreateListing({ user }: { user: any }) {
                     type="button"
                     onClick={() => removeImage(index)}
                     className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    aria-label="Remove image"
+                    title="Remove image"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -295,8 +299,9 @@ export default function CreateListing({ user }: { user: any }) {
 
         <div className="grid gap-6 rounded-[2.5rem] bg-white p-10 shadow-sm border border-slate-100">
           <div className="space-y-2">
-            <label className="text-sm font-bold text-slate-700">Title</label>
+            <label htmlFor="title" className="text-sm font-bold text-slate-700">Title</label>
             <input
+              id="title"
               type="text"
               required
               placeholder="e.g. Vintage Denim Jacket"
@@ -308,8 +313,9 @@ export default function CreateListing({ user }: { user: any }) {
 
           <div className="grid gap-6 md:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-700">Category</label>
+              <label htmlFor="category" className="text-sm font-bold text-slate-700">Category</label>
               <select
+                id="category"
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-6 outline-none focus:border-blue-500 focus:bg-white"
                 value={formData.category}
                 onChange={e => setFormData({...formData, category: e.target.value})}
@@ -322,8 +328,9 @@ export default function CreateListing({ user }: { user: any }) {
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-700">Condition</label>
+              <label htmlFor="condition" className="text-sm font-bold text-slate-700">Condition</label>
               <select
+                id="condition"
                 className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-6 outline-none focus:border-blue-500 focus:bg-white"
                 value={formData.condition}
                 onChange={e => setFormData({...formData, condition: e.target.value})}
@@ -337,8 +344,9 @@ export default function CreateListing({ user }: { user: any }) {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-bold text-slate-700">Description</label>
+            <label htmlFor="description" className="text-sm font-bold text-slate-700">Description</label>
             <textarea
+              id="description"
               required
               rows={4}
               placeholder="Describe the item's condition, size, brand, etc."
@@ -350,10 +358,11 @@ export default function CreateListing({ user }: { user: any }) {
 
           <div className="grid gap-6 md:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-700">Price ($)</label>
+              <label htmlFor="price" className="text-sm font-bold text-slate-700">Price ($)</label>
               <div className="relative">
                 <DollarSign className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                 <input
+                  id="price"
                   type="number"
                   required
                   placeholder="0.00"
